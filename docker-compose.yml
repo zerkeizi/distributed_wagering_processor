@@ -35,7 +35,20 @@ services:
       timeout: 5s
       retries: 60
 
+  # Aplica as migrations uma única vez antes das réplicas subirem: N instâncias não disputam o DDL.
+  migrate:
+    image: wagering-app:local
+    build: .
+    command: ["bun", "src/cli/migrate.ts", "up"]
+    environment:
+      DATABASE_URL: postgres://wagering:wagering@postgres:5432/wagering
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   app:
+    image: wagering-app:local
     build: .
     deploy:
       replicas: 3
@@ -50,8 +63,8 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       localstack:
         condition: service_healthy
 

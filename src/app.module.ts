@@ -5,6 +5,7 @@ import { type AppConfig, loadConfig } from "./shared/config/app-config.ts";
 import { ConfigModule } from "./shared/config/config.module.ts";
 import { InfrastructureModule } from "./shared/infrastructure/infrastructure.module.ts";
 import { ObservabilityModule } from "./shared/observability/observability.module.ts";
+import { PersistenceModule } from "./wagering/infrastructure/persistence/persistence.module.ts";
 
 /**
  * O servidor HTTP sobe em toda instância (health e métricas são sempre necessários); os papéis
@@ -19,6 +20,7 @@ export class AppModule {
         ConfigModule.forRoot(config),
         ObservabilityModule,
         InfrastructureModule,
+        PersistenceModule,
         HealthModule,
       ],
       controllers: [AppController],

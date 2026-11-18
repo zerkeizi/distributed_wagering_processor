@@ -58,6 +58,33 @@ src/
 - Todos os testes terminam verificando `wallet.balance == saldo reconstruído pelo ledger` por meio de um helper comum.
 - Os cenários de crash usam crash points (ADR 0016).
 
+## Schema: garantias aplicadas pelo banco
+
+> CHALLENGE §5.9 ("unicidade, imutabilidade e não-negatividade… no schema do banco, não apenas em código de aplicação")
+
+Migration: `src/wagering/infrastructure/persistence/migrations/Migration20261118000000_initial.ts`. Cada garantia abaixo tem um teste em `test/integration/persistence/constraints.test.ts` que tenta violá-la com SQL cru.
+
+| Garantia | Mecanismo no Postgres |
+|---|---|
+| Uma wallet por player + moeda | `UNIQUE (player_id, currency)` |
+| Saldo nunca negativo | `CHECK (balance >= 0)` na wallet e no ledger |
+| Toda alteração de saldo tem lançamento | constraint trigger **adiada para o commit** (`wallet_matches_ledger`): o saldo e a versão da wallet precisam bater com o último lançamento |
+| Ledger imutável | triggers bloqueiam `UPDATE`, `DELETE` e `TRUNCATE` |
+| Aritmética do lançamento | `CHECK (balance_after = balance_before ± amount)` |
+| Ledger encadeado e sem buracos | `UNIQUE (wallet_id, wallet_version)` + trigger que exige `balance_before` igual ao `balance_after` anterior |
+| Um lançamento por transação | `UNIQUE (transaction_id)` |
+| Lançamento/transação na moeda e player da wallet | FKs compostas `(wallet_id, currency)` e `(wallet_id, player_id, currency)` |
+| Idempotência persistente | `UNIQUE (provider_id, idempotency_key)` e `UNIQUE (provider_id, external_transaction_id)` |
+| Um reversal por alvo (ADR 0006) | índice único parcial em `reference_transaction_id` para `REFUND`/`ROLLBACK` `PROCESSED` |
+| `PENDING` nunca commitado (ADR 0004) | `CHECK` de status sem `PENDING` |
+| Estado terminal não muda; campos de negócio imutáveis | trigger `wager_transaction_guard` |
+| Coerência status ↔ campos | `CHECK`s (por exemplo, `REJECTED`/`FAILED` exigem `failure_code`; `PENDING_REFERENCE` exige `next_resolution_at`) |
+| Dedup do inbox | `PRIMARY KEY (consumer_name, message_id)` |
+
+Todas as FKs são `DEFERRABLE INITIALLY DEFERRED`. Wallet, transação `OPENING` e lançamento nascem no mesmo commit, e o Unit of Work não precisa ordenar os `INSERT`s pelas dependências.
+
+As migrations rodam num passo separado (serviço `migrate` do compose, `bun run migration:up`), nunca no boot da aplicação: 3 réplicas subindo juntas não disputam o DDL.
+
 ## Taxonomia de `failureCode`
 
 > CHALLENGE §7.2

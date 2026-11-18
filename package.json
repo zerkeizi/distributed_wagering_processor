@@ -16,10 +16,17 @@
     "smoke:infra": "bun scripts/smoke/index.ts infra",
     "infra:up": "docker compose up -d --build --wait",
     "infra:down": "docker compose down -v",
-    "smoke:domain": "bun scripts/smoke/index.ts domain"
+    "smoke:domain": "bun scripts/smoke/index.ts domain",
+    "migration:up": "bun src/cli/migrate.ts up",
+    "migration:down": "bun src/cli/migrate.ts down",
+    "migration:status": "bun src/cli/migrate.ts status",
+    "smoke:db": "bun scripts/smoke/index.ts db"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1171.0",
+    "@mikro-orm/core": "^7.2.10",
+    "@mikro-orm/migrations": "^7.2.10",
+    "@mikro-orm/postgresql": "^7.2.10",
     "@nestjs/common": "^12.5.1",
     "@nestjs/core": "^12.5.1",
     "@nestjs/platform-express": "^12.5.1",
