@@ -69,11 +69,23 @@ src/
 | Transitória | `TEMPORARILY_UNAVAILABLE`, `LOCK_TIMEOUT` | Reenviar a mesma requisição (com a mesma idempotency key) |
 | Falha interna (terminal) | `INTERNAL_INVARIANT_VIOLATION` | Escalar para suporte; ver ADR 0011 |
 
+## Interpretações adicionais das regras de negócio
+
+> README §7 ("Qualquer interpretação adicional adotada deve ser documentada")
+
+- **`LOSS` aceita `0.00`**: ela só registra o resultado. Todos os outros kinds exigem valor > 0.
+- **`BET` não pode ter referência.** `WIN` e `LOSS` podem referenciar uma `BET`; nesse caso valem as mesmas validações de pertencimento e o alvo precisa ser uma `BET` não revertida (ADR 0006).
+- **Uma transação não pode referenciar a si mesma** (`INVALID_PAYLOAD`).
+- **Reference que ainda aguarda a própria reference** (por exemplo, `ROLLBACK` de um `REFUND` que está em `PENDING_REFERENCE`): a transação continua esperando, em vez de ser rejeitada, e cada espera conta como tentativa. Uma reference `REJECTED` ou `FAILED` leva a `REFERENCE_NOT_PROCESSED`.
+- **Ordem das validações da reference:** pertencimento (provider, player, wallet, moeda, round) → kind permitido → estado → valor igual (só reversals) → já revertida. Assim, uma reference de outra wallet nunca revela detalhes sobre o estado dela.
+- **`aggregateId` dos eventos é sempre o `walletId`**, inclusive nos eventos de transação. A wallet é a unidade de concorrência e de ordenação (`MessageGroupId`), então os eventos de uma wallet saem na ordem em que aconteceram.
+- **`WagerTransactionPendingReference` é emitido uma única vez**, na entrada em `PENDING_REFERENCE`. As novas tentativas do worker não geram evento.
+
 ## Referências fora de ordem
 
 > README §7.1
 
-- O backoff exponencial começa em 2s, dobra a cada tentativa, tem teto de 5 min e para em **10 tentativas** (cerca de 18 min). Esse prazo cobre atrasos normais de entrega e redelivery do provider sem deixar transações pendentes por tempo indefinido. Todos os parâmetros são configuráveis por env (os testes usam milissegundos).
+- O backoff exponencial começa em 2s, dobra a cada tentativa, tem teto de 5 min e para em **10 novas tentativas** depois da primeira (cerca de 18,5 min no total; `ReferenceResolutionPolicy.default()`). Esse prazo cobre atrasos normais de entrega e redelivery do provider sem deixar transações pendentes por tempo indefinido. Todos os parâmetros são configuráveis por env (os testes usam milissegundos).
 - O worker pega trabalho com `FOR UPDATE SKIP LOCKED`, então pode rodar em várias instâncias.
 - Há um gatilho imediato: quando uma wager transaction vira `PROCESSED`, a mesma transação SQL zera o `next_attempt_at` das `PENDING_REFERENCE` que apontam para ela.
 - Esgotadas as tentativas: `REJECTED` com `REFERENCE_NOT_FOUND` e evento `WagerTransactionRejected`.

@@ -15,7 +15,8 @@
     "smoke": "bun scripts/smoke/index.ts",
     "smoke:infra": "bun scripts/smoke/index.ts infra",
     "infra:up": "docker compose up -d --build --wait",
-    "infra:down": "docker compose down -v"
+    "infra:down": "docker compose down -v",
+    "smoke:domain": "bun scripts/smoke/index.ts domain"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1171.0",
