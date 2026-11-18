@@ -56,7 +56,7 @@ export class HealthService {
       ]);
       return { status: "up", latencyMs: elapsed(startedAt) };
     } catch (error) {
-      // Só o nome/mensagem curta: a resposta de health é pública (README §9).
+      // Só o nome/mensagem curta: a resposta de health é pública (CHALLENGE §9).
       const message = error instanceof Error ? error.message : "unknown error";
       return { status: "down", latencyMs: elapsed(startedAt), error: message.slice(0, 200) };
     } finally {

@@ -62,9 +62,9 @@ export interface WagerTransactionState {
   readonly referenceTransactionId: string | undefined;
   readonly failureCode: FailureCode | undefined;
   readonly processedAt: Date | undefined;
-  /** Saldo observado ao finalizar (PROCESSED/REJECTED): o replay devolve este valor (README §7.7). */
+  /** Saldo observado ao finalizar (PROCESSED/REJECTED): o replay devolve este valor (CHALLENGE §7.7). */
   readonly balanceAfter: Money | undefined;
-  /** Novas tentativas de resolver a reference já agendadas (README §7.1). */
+  /** Novas tentativas de resolver a reference já agendadas (CHALLENGE §7.1). */
   readonly resolutionAttempts: number;
   readonly nextResolutionAt: Date | undefined;
 }
@@ -429,7 +429,7 @@ export class WagerTransaction {
     }
   }
 
-  /** Aposta sem saldo e reversão sem saldo são situações operacionais distintas (README §7.9). */
+  /** Aposta sem saldo e reversão sem saldo são situações operacionais distintas (CHALLENGE §7.9). */
   insufficientFundsCode(): FailureCode {
     return this.isReversal()
       ? FailureCode.ReversalInsufficientFunds

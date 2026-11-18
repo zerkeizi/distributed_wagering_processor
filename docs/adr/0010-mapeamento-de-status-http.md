@@ -1,6 +1,6 @@
 # Rejeição de negócio persistida responde 422 com corpo completo
 
-> Referência no README: §9 API HTTP — "Status HTTP" (distinguir payload inválido, conflito, rejeição, pendente e falha transitória) e Idempotência (replay retorna a mesma resposta); §7.2 Códigos de falha.
+> Referência no CHALLENGE: §9 API HTTP — "Status HTTP" (distinguir payload inválido, conflito, rejeição, pendente e falha transitória) e Idempotência (replay retorna a mesma resposta); §7.2 Códigos de falha.
 
 O provider decide o que fazer pelo status, sem precisar ler a mensagem. Por isso cada situação tem um status próprio, igual em todos os endpoints:
 

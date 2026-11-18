@@ -6,7 +6,7 @@ import { APP_CONFIG } from "../config/config.module.ts";
 import { currentLogContext } from "./log-context.ts";
 
 /**
- * Chaves que nunca devem aparecer em log (README §12: sem dados sensíveis nem payloads
+ * Chaves que nunca devem aparecer em log (CHALLENGE §12: sem dados sensíveis nem payloads
  * financeiros completos). Os serializers já não registram corpo de requisição; a redaction é
  * a segunda barreira para logs estruturados escritos pela aplicação.
  */

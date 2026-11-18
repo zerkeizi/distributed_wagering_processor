@@ -22,7 +22,7 @@ export interface WagerTransactionProcessedData {
   processedAt: string;
 }
 
-/** Qualquer transação aplicada, inclusive LOSS (README §11). */
+/** Qualquer transação aplicada, inclusive LOSS (CHALLENGE §11). */
 export class WagerTransactionProcessed extends IntegrationEvent<WagerTransactionProcessedData> {
   readonly eventType = "WagerTransactionProcessed";
   readonly version = 1;

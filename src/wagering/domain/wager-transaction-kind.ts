@@ -11,7 +11,7 @@ export enum WagerTransactionKind {
 export enum WagerTransactionStatus {
   /** Aceita, ainda não aplicada. Existe só em memória dentro da transação SQL (ADR 0004). */
   Pending = "PENDING",
-  /** Aguardando a reference chegar; reprocessada pelo worker (README §7.1). */
+  /** Aguardando a reference chegar; reprocessada pelo worker (CHALLENGE §7.1). */
   PendingReference = "PENDING_REFERENCE",
   Processed = "PROCESSED",
   Rejected = "REJECTED",

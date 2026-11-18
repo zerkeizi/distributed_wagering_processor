@@ -1,10 +1,10 @@
 # Arquitetura — Distributed Wagering Processor
 
-> Documento vivo. As decisões que custam caro para reverter estão em [`docs/adr/`](docs/adr/). O vocabulário de domínio está em [`GLOSSARY.md`](GLOSSARY.md).
+> Enunciado do desafio: [`CHALLENGE.md`](CHALLENGE.md). Documento vivo. As decisões que custam caro para reverter estão em [`docs/adr/`](docs/adr/). O vocabulário de domínio está em [`GLOSSARY.md`](GLOSSARY.md).
 
 ## Índice de decisões (ADRs)
 
-| ADR | Decisão | README |
+| ADR | Decisão | CHALLENGE |
 |---|---|---|
 | [0001](docs/adr/0001-mikroorm-com-entityschema.md) | MikroORM com `EntitySchema`, domínio puro | §4, §6.0 |
 | [0002](docs/adr/0002-money-em-bigint-de-centavos.md) | `Money` como `bigint` de centavos; `NUMERIC(20,2)` no banco | §5.1, §6.1 |
@@ -25,7 +25,7 @@
 
 ## Layout do código
 
-> README §14 (boundaries, portas, simplicidade)
+> CHALLENGE §14 (boundaries, portas, simplicidade)
 
 ```
 src/
@@ -40,7 +40,7 @@ src/
 
 ## Identificadores e correlação
 
-> README §6, §11, §12
+> CHALLENGE §6, §11, §12
 
 - Os IDs internos (wallet, transaction, ledger entry, event) são UUIDv7 gerados na aplicação com `Bun.randomUUIDv7()`. `playerId` e `walletId` são validados como UUID. `providerId`, `externalTransactionId`, `roundId` e `gameId` são strings opacas com limite de tamanho.
 - `correlationId`:
@@ -51,7 +51,7 @@ src/
 
 ## Testes
 
-> README §13
+> CHALLENGE §13
 
 - `bun run test:unit` não usa containers. `test:integration` e `test:concurrency` exigem `docker compose up` (Postgres e LocalStack reais).
 - Para o isolamento, cada teste cria as próprias wallets e providers com IDs aleatórios, sem truncar tabelas, e cada suíte usa um prefixo de fila próprio.
@@ -60,7 +60,7 @@ src/
 
 ## Taxonomia de `failureCode`
 
-> README §7.2
+> CHALLENGE §7.2
 
 | Classe | Códigos | Ação do provider |
 |---|---|---|
@@ -71,7 +71,7 @@ src/
 
 ## Interpretações adicionais das regras de negócio
 
-> README §7 ("Qualquer interpretação adicional adotada deve ser documentada")
+> CHALLENGE §7 ("Qualquer interpretação adicional adotada deve ser documentada")
 
 - **`LOSS` aceita `0.00`**: ela só registra o resultado. Todos os outros kinds exigem valor > 0.
 - **`BET` não pode ter referência.** `WIN` e `LOSS` podem referenciar uma `BET`; nesse caso valem as mesmas validações de pertencimento e o alvo precisa ser uma `BET` não revertida (ADR 0006).
@@ -83,7 +83,7 @@ src/
 
 ## Referências fora de ordem
 
-> README §7.1
+> CHALLENGE §7.1
 
 - O backoff exponencial começa em 2s, dobra a cada tentativa, tem teto de 5 min e para em **10 novas tentativas** depois da primeira (cerca de 18,5 min no total; `ReferenceResolutionPolicy.default()`). Esse prazo cobre atrasos normais de entrega e redelivery do provider sem deixar transações pendentes por tempo indefinido. Todos os parâmetros são configuráveis por env (os testes usam milissegundos).
 - O worker pega trabalho com `FOR UPDATE SKIP LOCKED`, então pode rodar em várias instâncias.
@@ -92,13 +92,13 @@ src/
 
 ## Topologia
 
-> README §8, §13 (≥ 3 instâncias)
+> CHALLENGE §8, §13 (≥ 3 instâncias)
 
 Uma única imagem, com papéis ligados por env: `api`, `consumer`, `outbox-publisher` e `pending-reference-worker`, todos ativos por padrão. O Docker Compose sobe 3 réplicas atrás de um nginx. Nos testes de concorrência, 3 ou mais processos Bun são iniciados via `Bun.spawn` contra o Postgres e o LocalStack reais.
 
 ## Observabilidade
 
-> README §12
+> CHALLENGE §12
 
 - Logs JSON com `nestjs-pino`, `correlationId` propagado por AsyncLocalStorage e redaction de valores e payloads financeiros.
 - `GET /metrics` com `prom-client`: transações por status, duplicatas detectadas, retries, mensagens em DLQ, lock timeouts, outbox lag (idade do evento pendente mais antigo), latência de processamento (histograma) e divergências de reconciliação.
@@ -106,7 +106,7 @@ Uma única imagem, com papéis ligados por env: `api`, `consumer`, `outbox-publi
 
 ## Reconciliação
 
-> README §9 Reconciliação
+> CHALLENGE §9 Reconciliação
 
 A reconciliação lê a wallet e o ledger num snapshot `REPEATABLE READ`, sem lock, para não travar a hot wallet. Ela soma o ledger e também valida o encadeamento: cada `balance_before` é igual ao `balance_after` anterior, e as versões não têm buracos. Divergências são logadas, contadas em métrica e retornadas com `consistent: false` e a lista de anomalias. Nada é corrigido automaticamente.
 
@@ -121,6 +121,6 @@ O extrato (`GET /wallets/:id/ledger`) vai do mais recente para o mais antigo, co
 
 ## Trabalho futuro
 
-- **Teste de carga (`bun run test:load`)**: fora do escopo desta entrega (README §14, diferenciais opcionais). O plano seria um script Bun próprio com uma mistura de hot wallet e wallets distribuídas contra 3 réplicas, medindo throughput, p50/p95/p99, taxa de erro, lock timeouts e outbox lag, com ambiente e metodologia documentados.
+- **Teste de carga (`bun run test:load`)**: fora do escopo desta entrega (CHALLENGE §14, diferenciais opcionais). O plano seria um script Bun próprio com uma mistura de hot wallet e wallets distribuídas contra 3 réplicas, medindo throughput, p50/p95/p99, taxa de erro, lock timeouts e outbox lag, com ambiente e metodologia documentados.
 - Integração com IdP (Keycloak, client-credentials por provider), conforme o ADR 0005.
 - Double-entry ledger com contas de contrapartida.

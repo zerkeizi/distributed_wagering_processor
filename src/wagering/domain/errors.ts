@@ -29,7 +29,7 @@ export class WalletPlayerMismatchError extends DomainError {
 
 /**
  * Tentativa de transicionar uma transação terminal ou de um estado que não permite a transição.
- * É erro de programação, não caminho de negócio (README §6.3).
+ * É erro de programação, não caminho de negócio (CHALLENGE §6.3).
  */
 export class InvalidTransactionStateError extends Error {
   readonly code = FailureCode.InternalInvariantViolation;

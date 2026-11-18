@@ -1,6 +1,6 @@
 # Lock pessimista por linha de wallet
 
-> Referência no README: §5 Restrições invioláveis, itens 6, 7, 8 e 9; §6.2 Wallet (invariantes e `version`); §8 Concorrência e ordenação (cenário obrigatório); §12 Observabilidade ("conflitos de lock").
+> Referência no CHALLENGE: §5 Restrições invioláveis, itens 6, 7, 8 e 9; §6.2 Wallet (invariantes e `version`); §8 Concorrência e ordenação (cenário obrigatório); §12 Observabilidade ("conflitos de lock").
 
 Toda operação que altera o balance abre uma transação SQL e faz `SELECT … FOR UPDATE` na linha da wallet (`LockMode.PESSIMISTIC_WRITE`). A serialização acontece por `walletId`, nunca por um lock global. Por baixo disso ficam `CHECK (balance >= 0)` no schema e o incremento de `version` como defesa em profundidade. Usamos `lock_timeout` para que esperas longas virem falha transitória contabilizada como conflito de lock.
 

@@ -321,7 +321,7 @@ describe("ROLLBACK", () => {
   });
 });
 
-describe("pertencimento da referência (README §7.2)", () => {
+describe("pertencimento da referência (CHALLENGE §7.2)", () => {
   const cases: [string, Partial<Parameters<typeof wager>[1]>][] = [
     ["outra rodada", { roundId: "round-000" }],
     ["outro provider", { providerId: "provider-b" }],
@@ -358,7 +358,7 @@ describe("pertencimento da referência (README §7.2)", () => {
   });
 });
 
-describe("referência fora de ordem (README §7.1)", () => {
+describe("referência fora de ordem (CHALLENGE §7.1)", () => {
   test("referência ausente → PENDING_REFERENCE, nada muda no saldo", () => {
     const wallet = openWallet("100.00");
     const rollback = wager(Kind.Rollback, { referenceExternalTransactionId: "not-yet" });

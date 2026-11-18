@@ -1,6 +1,6 @@
 # Unicidade por provider na idempotency key e no id externo
 
-> Referência no README: §9 API HTTP — Idempotência; §6.3 WagerTransaction ("mesma idempotency key com payload diferente é conflito"); §7 regra 7 (replay retorna o resultado original); §5 itens 2 e 9.
+> Referência no CHALLENGE: §9 API HTTP — Idempotência; §6.3 WagerTransaction ("mesma idempotency key com payload diferente é conflito"); §7 regra 7 (replay retorna o resultado original); §5 itens 2 e 9.
 
 Duas constraints no banco: `UNIQUE (provider_id, idempotency_key)` e `UNIQUE (provider_id, external_transaction_id)`. Os casos ficam assim:
 

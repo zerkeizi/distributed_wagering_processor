@@ -31,7 +31,7 @@ export type SettlementOutcome =
   | { readonly status: WagerTransactionStatus.PendingReference; readonly nextAttemptAt: Date };
 
 /**
- * Aplica as regras de negócio (README §7) de uma wager transaction sobre a wallet, mutando ambas
+ * Aplica as regras de negócio (CHALLENGE §7) de uma wager transaction sobre a wallet, mutando ambas
  * de forma consistente: ou o saldo muda junto com o lançamento e a transação vira PROCESSED, ou
  * nada no saldo muda. Função pura de domínio — sem I/O; persistir o resultado é do use case.
  */

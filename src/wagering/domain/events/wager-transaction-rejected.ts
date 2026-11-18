@@ -22,7 +22,7 @@ export interface WagerTransactionRejectedData {
   rejectedAt: string;
 }
 
-/** Transação rejeitada por regra de negócio, inclusive reference que nunca chegou (README §7.1). */
+/** Transação rejeitada por regra de negócio, inclusive reference que nunca chegou (CHALLENGE §7.1). */
 export class WagerTransactionRejected extends IntegrationEvent<WagerTransactionRejectedData> {
   readonly eventType = "WagerTransactionRejected";
   readonly version = 1;

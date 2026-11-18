@@ -1,6 +1,6 @@
 # Ledger de partida simples, encadeado por versão da wallet
 
-> Referência no README: §6.4 WalletLedgerEntry; §5 itens 5 e 9; §7 regra 7 ("incluindo o saldo observado naquele momento"); §9 Consultas (cursor estável) e Reconciliação; §13 (invariante final).
+> Referência no CHALLENGE: §6.4 WalletLedgerEntry; §5 itens 5 e 9; §7 regra 7 ("incluindo o saldo observado naquele momento"); §9 Consultas (cursor estável) e Reconciliação; §13 (invariante final).
 
 O ledger é de partida simples, sem double-entry. Cada ledger entry guarda `balance_before` e `balance_after`, e o schema impõe:
 

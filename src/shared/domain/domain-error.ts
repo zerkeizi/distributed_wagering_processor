@@ -1,5 +1,5 @@
 /**
- * Erro de regra de negócio com um código estável e legível por máquina (README §7.2).
+ * Erro de regra de negócio com um código estável e legível por máquina (CHALLENGE §7.2).
  * Erros de programação (estado impossível, invariante quebrada) NÃO estendem esta classe:
  * eles não são caminho de negócio e devem chegar ao cliente como falha interna.
  */

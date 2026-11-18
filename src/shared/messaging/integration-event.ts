@@ -11,7 +11,7 @@ export interface IntegrationEventProps<T> extends EventContext {
   readonly data: T;
 }
 
-/** Envelope serializado gravado no payload da outbox e publicado no broker (README §11). */
+/** Envelope serializado gravado no payload da outbox e publicado no broker (CHALLENGE §11). */
 export interface IntegrationEventEnvelope<T> {
   readonly eventId: string;
   readonly eventType: string;

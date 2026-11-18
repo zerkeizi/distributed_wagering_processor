@@ -1,7 +1,7 @@
 import { Controller, Get, HttpCode, HttpStatus, ServiceUnavailableException } from "@nestjs/common";
 import { HealthService, type ReadinessReport } from "./health.service.ts";
 
-/** Sem guard de autenticação, por exigência do README §2 e §9. */
+/** Sem guard de autenticação, por exigência do CHALLENGE §2 e §9. */
 @Controller("health")
 export class HealthController {
   constructor(private readonly health: HealthService) {}

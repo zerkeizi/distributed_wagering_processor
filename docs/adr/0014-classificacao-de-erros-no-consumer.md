@@ -1,6 +1,6 @@
 # Classificação de erros no consumer SQS
 
-> Referência no README: §10 Processamento por SQS (negócio → ack; transitório → retry com backoff; permanente → DLQ; limite de tentativas; SIGTERM; redelivery); §6.5 InboxMessage; §5 item 3.
+> Referência no CHALLENGE: §10 Processamento por SQS (negócio → ack; transitório → retry com backoff; permanente → DLQ; limite de tentativas; SIGTERM; redelivery); §6.5 InboxMessage; §5 item 3.
 
 - **Negócio** (`REJECTED`, wallet inexistente, idempotency conflict): commit do resultado junto com o registro no inbox, depois ack.
 - **Transitório** (banco ou SQS indisponível, lock timeout): sem ack. O consumer chama `ChangeMessageVisibility` com backoff exponencial calculado pelo `ApproximateReceiveCount`, e a redrive policy envia para a DLQ após `maxReceiveCount = 5`.

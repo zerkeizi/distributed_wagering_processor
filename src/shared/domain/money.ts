@@ -1,6 +1,6 @@
 import { DomainError } from "./domain-error.ts";
 
-/** Formato de contrato e de payload de evento: valor sempre como string decimal (README §6.1). */
+/** Formato de contrato e de payload de evento: valor sempre como string decimal (CHALLENGE §6.1). */
 export interface MoneyProps {
   readonly amount: string;
   readonly currency: string;

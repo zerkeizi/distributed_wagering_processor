@@ -2,7 +2,7 @@ import { FailureCode } from "./failure-code.ts";
 import type { WagerTransaction } from "./wager-transaction.ts";
 import { WagerTransactionKind, WagerTransactionStatus } from "./wager-transaction-kind.ts";
 
-/** Quais kinds cada operação pode referenciar (README §7.3, ADR 0006). */
+/** Quais kinds cada operação pode referenciar (CHALLENGE §7.3, ADR 0006). */
 const ALLOWED_REFERENCE_KINDS: Readonly<
   Record<WagerTransactionKind, readonly WagerTransactionKind[]>
 > = {
@@ -57,7 +57,7 @@ export function evaluateReference(
     return reject(FailureCode.ReferenceNotProcessed);
   }
 
-  // Reversão parcial está fora de escopo (README §7.5).
+  // Reversão parcial está fora de escopo (CHALLENGE §7.5).
   if (transaction.isReversal() && !ref.money.equals(transaction.money)) {
     return reject(FailureCode.AmountMismatch);
   }

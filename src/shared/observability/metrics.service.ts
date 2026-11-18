@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Counter, collectDefaultMetrics, Gauge, Histogram, Registry } from "prom-client";
 
 /**
- * Catálogo único de métricas (README §12). Declaradas todas no boot para que `/metrics`
+ * Catálogo único de métricas (CHALLENGE §12). Declaradas todas no boot para que `/metrics`
  * já exponha a série completa (com zero) antes do primeiro evento — dashboards e alertas não
  * precisam lidar com séries ausentes.
  */

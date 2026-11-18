@@ -1,5 +1,5 @@
 /**
- * Taxonomia estável de falhas (README §7.2, ARCHITECTURE.md). O provider decide o que fazer
+ * Taxonomia estável de falhas (CHALLENGE §7.2, ARCHITECTURE.md). O provider decide o que fazer
  * pela categoria do código, sem interpretar mensagens.
  */
 export enum FailureCode {

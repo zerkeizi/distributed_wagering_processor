@@ -14,11 +14,11 @@ export interface OutboxMessageState {
 }
 
 /**
- * Evento de integração aguardando publicação (transactional outbox, README §11). Nasce na mesma
+ * Evento de integração aguardando publicação (transactional outbox, CHALLENGE §11). Nasce na mesma
  * transação SQL da mudança que o originou; o id é o próprio `eventId`, que viaja junto na
  * publicação e permite ao consumidor descartar duplicatas.
  *
- * Não há limite de tentativas: um evento confirmado nunca é descartado (README §3). O atraso
+ * Não há limite de tentativas: um evento confirmado nunca é descartado (CHALLENGE §3). O atraso
  * fica visível na métrica de outbox lag (ADR 0013).
  */
 export class OutboxMessage {

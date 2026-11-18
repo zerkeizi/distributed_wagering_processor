@@ -1,6 +1,6 @@
 # Processamento síncrono no HTTP, mesmo use case do SQS
 
-> Referência no README: §6.3 WagerTransaction (status `PENDING`); §9 API HTTP — Submeter transação (resposta com `status` e `balance`); §10 Processamento por SQS ("reutilizar o mesmo use case da entrada HTTP").
+> Referência no CHALLENGE: §6.3 WagerTransaction (status `PENDING`); §9 API HTTP — Submeter transação (resposta com `status` e `balance`); §10 Processamento por SQS ("reutilizar o mesmo use case da entrada HTTP").
 
 ## Decisão
 

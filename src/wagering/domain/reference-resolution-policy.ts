@@ -1,7 +1,7 @@
 import { ExponentialBackoff } from "../../shared/domain/exponential-backoff.ts";
 
 /**
- * Quanto esperar por uma reference fora de ordem (README §7.1, ARCHITECTURE.md). O default —
+ * Quanto esperar por uma reference fora de ordem (CHALLENGE §7.1, ARCHITECTURE.md). O default —
  * 10 novas tentativas, backoff 2s → 5min — dá ~18,5 min, suficiente para cobrir atrasos e
  * redeliveries normais do provider sem deixar transações pendentes indefinidamente.
  */

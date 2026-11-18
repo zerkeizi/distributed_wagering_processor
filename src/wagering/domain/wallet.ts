@@ -41,7 +41,7 @@ export interface BalanceMovement {
  * Aggregate root do saldo. Toda alteração de saldo passa por `debit`/`credit`, que devolvem o
  * lançamento correspondente: não existe forma de mudar o saldo sem produzir um ledger entry.
  *
- * `version` começa em 1 após a abertura e incrementa somente quando o saldo muda (README §6.2).
+ * `version` começa em 1 após a abertura e incrementa somente quando o saldo muda (CHALLENGE §6.2).
  * A abertura com saldo inicial > 0 é o próprio movimento que leva a versão de 0 a 1.
  */
 export class Wallet {

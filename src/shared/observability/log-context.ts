@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
- * Campos de correlação exigidos nos logs (README §12). Ficam num AsyncLocalStorage para que
+ * Campos de correlação exigidos nos logs (CHALLENGE §12). Ficam num AsyncLocalStorage para que
  * qualquer log emitido durante uma requisição HTTP ou uma mensagem SQS os carregue sem
  * precisar repassar um logger filho manualmente.
  */
