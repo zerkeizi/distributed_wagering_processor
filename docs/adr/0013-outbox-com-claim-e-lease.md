@@ -1,0 +1,9 @@
+# Outbox publicada com claim por SKIP LOCKED e lease
+
+> Referência no README: §11 Transactional Outbox (publishers concorrentes, cenário de crash após o commit, publicação duplicada segura); §5 item 4; §6.5 OutboxMessage (`scheduleRetry`, backoff); §12 (outbox lag).
+
+Cada publisher pega um lote numa transação curta: `SELECT … FOR UPDATE SKIP LOCKED` sobre os eventos pendentes e vencidos, gravando `locked_until = now() + lease`. Depois do commit, ele publica no SQS (`wagering-events.fifo`, `MessageGroupId = aggregateId`, `MessageDeduplicationId = eventId`) e marca `published_at`. Numa falha, chama `scheduleRetry` com backoff exponencial **sem limite de tentativas**: o evento nunca é descartado, e o atraso aparece na métrica de outbox lag. Se o processo morrer, o lease expira e outra instância publica. Um duplicado é seguro porque o consumidor deduplica por `eventId`.
+
+## Considered Options
+
+Segurar a transação aberta durante o publish elimina o lease, mas mantém conexões e locks presos enquanto o SQS responde. Uma lentidão do SQS esgotaria o pool usado pelo fluxo financeiro.
