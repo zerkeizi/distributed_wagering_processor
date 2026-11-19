@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { useTestApp } from "../support/http-app.ts";
-import { assertLedgerConsistent } from "../support/ledger-consistency.ts";
+import {
+  assertLedgerConsistent,
+  markIntentionallyCorrupted,
+} from "../support/ledger-consistency.ts";
 
 const app = useTestApp();
 const uuid = () => Bun.randomUUIDv7();
@@ -263,6 +266,7 @@ describe("POST /wallets/:walletId/reconciliation", () => {
     const { walletId } = await createWallet("100.00");
     const before = await divergenceCount();
     // Corrompe o saldo passando por cima das triggers (só possível como superusuário, de propósito).
+    markIntentionallyCorrupted(walletId);
     await app().db.inTransaction(async (exec) => {
       await exec("set local session_replication_role = replica");
       await exec("update wallet set balance = 150.00 where id = ?", [walletId]);

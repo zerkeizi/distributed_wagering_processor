@@ -27,8 +27,10 @@ import { UNIT_OF_WORK } from "./infrastructure/persistence/persistence.module.ts
  */
 @Module({
   providers: [
-    // Uma fila por processo: HTTP, consumer e worker da mesma instância compartilham a mesma.
-    { provide: WALLET_MUTEX, useValue: new KeyedMutex() },
+    // Uma fila por instância da aplicação: HTTP, consumer e worker dela compartilham a mesma. Factory,
+    // não `useValue`: um valor no decorator seria único por PROCESSO, e várias apps no mesmo processo
+    // (testes de concorrência) deixariam de se comportar como instâncias separadas.
+    { provide: WALLET_MUTEX, useFactory: () => new KeyedMutex() },
     { provide: WAGERING_TELEMETRY, useClass: WageringTelemetryAdapter },
     { provide: PROVIDER_IDENTITY, useClass: UnauthenticatedProviderIdentity },
     {

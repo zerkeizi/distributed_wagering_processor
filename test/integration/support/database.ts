@@ -2,6 +2,7 @@ import { afterAll, beforeAll } from "bun:test";
 import { MikroORM } from "@mikro-orm/postgresql";
 import { createOrmOptions } from "../../../src/wagering/infrastructure/persistence/mikro-orm.config.ts";
 import { MikroOrmUnitOfWork } from "../../../src/wagering/infrastructure/persistence/mikro-orm-unit-of-work.ts";
+import { assertWalletsConsistentSince } from "./ledger-consistency.ts";
 
 /**
  * Testes de integração rodam contra o Postgres real do docker compose, num banco próprio
@@ -66,14 +67,23 @@ export async function openFreshDatabase(
   };
 }
 
-/** Abre o banco antes dos testes do arquivo e fecha no fim. */
+/**
+ * Abre o banco antes dos testes do arquivo e fecha no fim — depois de verificar a invariante de
+ * saldo × ledger em todas as wallets criadas pela suíte (CHALLENGE §13).
+ */
 export function useTestDatabase(): () => TestDatabase {
   let db: TestDatabase | undefined;
+  let startedAt = new Date();
   beforeAll(async () => {
+    startedAt = new Date();
     db = await openTestDatabase();
   });
   afterAll(async () => {
-    await db?.orm.close();
+    try {
+      if (db) await assertWalletsConsistentSince(db, startedAt);
+    } finally {
+      await db?.orm.close();
+    }
   });
   return () => {
     if (!db) throw new Error("test database not initialized (call inside a test)");

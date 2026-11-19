@@ -5,7 +5,10 @@ import type { WageringTelemetry } from "../../../src/wagering/application/ports/
 import { ResolvePendingReferences } from "../../../src/wagering/application/use-cases/resolve-pending-references.ts";
 import { ReferenceResolutionPolicy } from "../../../src/wagering/domain/reference-resolution-policy.ts";
 import { useTestApp } from "../support/http-app.ts";
-import { assertLedgerConsistent } from "../support/ledger-consistency.ts";
+import {
+  assertLedgerConsistent,
+  markIntentionallyCorrupted,
+} from "../support/ledger-consistency.ts";
 import { eventually } from "../support/sqs.ts";
 import { balanceOf, createWallet, submitWager, uuid } from "../support/wagering-client.ts";
 
@@ -98,6 +101,7 @@ describe("worker de PENDING_REFERENCE", () => {
       externalTransactionId: winExt,
       referenceExternalTransactionId: bet.externalTransactionId,
     });
+    markIntentionallyCorrupted(w.walletId);
     await app().db.inTransaction(async (exec) => {
       // Corrompe o saldo por fora das triggers e devolve a pendente para "vencida".
       await exec("set local session_replication_role = replica");

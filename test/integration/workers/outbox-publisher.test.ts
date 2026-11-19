@@ -12,10 +12,6 @@ beforeAll(async () => {
   queues = await createTestQueues();
   fresh = await openFreshDatabase("outbox");
 });
-afterAll(async () => {
-  await queues?.destroy();
-  await fresh?.drop();
-});
 
 // Banco exclusivo: a outbox só contém os eventos criados por esta suíte.
 const app = useTestApp(() => ({
@@ -25,6 +21,12 @@ const app = useTestApp(() => ({
   OUTBOX_POLL_INTERVAL_MS: "100",
   OUTBOX_BATCH_SIZE: "500",
 }));
+// Depois do afterAll da app (registrado acima): a app fecha e confere a invariante antes de o
+// banco exclusivo e as filas sumirem.
+afterAll(async () => {
+  await queues?.destroy();
+  await fresh?.drop();
+});
 
 const eventsUrl = async () =>
   (

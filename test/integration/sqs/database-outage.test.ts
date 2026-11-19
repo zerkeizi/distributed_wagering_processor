@@ -31,12 +31,6 @@ beforeAll(async () => {
   databaseName = new URL(fresh.url).pathname.slice(1);
   admin = await MikroORM.init(createOrmOptions({ databaseUrl: TEST_DATABASE_URL, poolMax: 1 }));
 });
-afterAll(async () => {
-  await restoreDatabase();
-  await admin?.close();
-  await queues?.destroy();
-  await fresh?.drop();
-});
 
 const app = useTestApp(() => ({
   ROLES: "api,consumer",
@@ -49,6 +43,14 @@ const app = useTestApp(() => ({
   SQS_CONSUMER_PAUSE_PROBE_MAX_MS: "1000",
   DATABASE_CONNECT_TIMEOUT_MS: "1000",
 }));
+// Depois do afterAll da app (registrado acima): a app fecha e confere a invariante antes de o
+// banco exclusivo e as filas sumirem.
+afterAll(async () => {
+  await restoreDatabase();
+  await admin?.close();
+  await queues?.destroy();
+  await fresh?.drop();
+});
 
 async function takeDatabaseDown(): Promise<void> {
   const sql = admin.em.fork().getConnection();

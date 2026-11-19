@@ -70,7 +70,7 @@ A dependência é sempre para dentro: `interface` → `application` → `domain`
 
 - `bun run test:unit` não usa containers. `test:integration` e `test:concurrency` exigem `docker compose up` (Postgres e LocalStack reais).
 - Para o isolamento, cada teste cria as próprias wallets e providers com IDs aleatórios, sem truncar tabelas, e cada suíte usa um prefixo de fila próprio.
-- Todos os testes terminam verificando `wallet.balance == saldo reconstruído pelo ledger` por meio de um helper comum.
+- A invariante `wallet.balance == saldo reconstruído pelo ledger` é verificada **automaticamente no fim de toda suíte** que toca o banco: `useTestDatabase` e o `close()` das apps de teste conferem, numa única query, todas as wallets criadas desde o início da suíte (saldo e encadeamento do ledger), e a suíte falha se alguma divergir. As duas wallets corrompidas de propósito (reconciliação com divergência, `FAILED` no worker) são marcadas com `markIntentionallyCorrupted`. Testes que precisam do estado no meio do caminho ainda chamam `assertLedgerConsistent` por conta própria.
 - Os cenários de crash usam crash points (ADR 0016).
 - Suítes que não podem enxergar o que outras deixaram para trás (outbox, multi-instância) usam um **banco próprio**, criado e migrado na hora e apagado no fim.
 
@@ -78,14 +78,16 @@ Onde está cada cenário de concorrência exigido (CHALLENGE §13):
 
 | # | Cenário | Teste |
 |---|---|---|
-| 1 | mesma aposta 50× em paralelo | `test/concurrency/same-wallet.test.ts` |
-| 2 | disputa de saldo na mesma wallet (§8) | `test/concurrency/same-wallet.test.ts` |
+| 1 | mesma aposta 50× em paralelo | `test/concurrency/same-wallet.test.ts` (3 instâncias; o lock é disputado no Postgres) |
+| 2 | disputa de saldo na mesma wallet (§8) | `test/concurrency/same-wallet.test.ts` (cada BET de 80 numa instância diferente) |
 | 3 | wallets distintas em paralelo | `test/concurrency/distinct-wallets.test.ts` |
 | 4 | ≥ 3 processos simultâneos | `test/concurrency/multi-instance.test.ts` (processos `bun src/main.ts` reais) |
 | 5 | worker morto depois do commit e antes do ack | `multi-instance.test.ts` (crash point) |
 | 6 | dois publishers sobre a mesma outbox | `test/integration/workers/relay-outbox.test.ts` + `multi-instance.test.ts` (crash do publisher) |
 | 7 | ROLLBACK/REFUND antes da referência | `test/integration/workers/pending-reference.test.ts` + `multi-instance.test.ts` |
 | 8 | reinício com consistência final | `multi-instance.test.ts` (SIGKILL + SIGTERM no meio da carga) |
+
+Os testes de mesma wallet espalham as requisições entre **três instâncias** da app. A fila por wallet (`KeyedMutex`) serializa os pedidos dentro de uma instância, então com uma instância só o `FOR UPDATE` nunca seria disputado e os testes passariam mesmo sem ele. Com três, a disputa acontece no Postgres. Isso foi verificado por mutação: sem o `FOR UPDATE`, 5 dos 6 testes falham, enquanto a versão antiga, com uma instância, passava inteira.
 
 Premissas da CHALLENGE §3 que também têm teste próprio:
 

@@ -3,6 +3,7 @@ import type { INestApplication } from "@nestjs/common";
 import { createApp } from "../../../src/bootstrap.ts";
 import { loadConfig } from "../../../src/shared/config/app-config.ts";
 import { openTestDatabase, TEST_DATABASE_URL, type TestDatabase } from "./database.ts";
+import { assertWalletsConsistentSince } from "./ledger-consistency.ts";
 
 export interface TestApp {
   readonly baseUrl: string;
@@ -29,6 +30,7 @@ export interface TestResponse {
 export async function startTestApp(
   env: Record<string, string> = {},
 ): Promise<TestApp & { close(): Promise<void> }> {
+  const startedAt = new Date();
   const databaseUrl = env.DATABASE_URL ?? TEST_DATABASE_URL;
   const db = await openTestDatabase(databaseUrl);
   const config = loadConfig({
@@ -68,9 +70,14 @@ export async function startTestApp(
       }
       return { status: res.status, headers: res.headers, body };
     },
+    /** Fecha a app e confere a invariante de saldo × ledger das wallets criadas desde o start. */
     async close() {
-      await app.close();
-      await db.orm.close();
+      try {
+        await app.close();
+        await assertWalletsConsistentSince(db, startedAt);
+      } finally {
+        await db.orm.close();
+      }
     },
   };
 }

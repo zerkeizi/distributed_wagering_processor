@@ -14,10 +14,17 @@ import {
 
 /**
  * Paralelismo real (CHALLENGE §13 "Concorrência"): as requisições saem todas ao mesmo tempo com
- * Promise.all contra o servidor HTTP, e cada uma abre sua própria conexão e transação no Postgres.
- * Nada é sequencial nem mockado — a disputa pelo lock da wallet acontece de verdade no banco.
+ * Promise.all, espalhadas entre TRÊS instâncias da aplicação, cada uma com seu pool e sua fila por
+ * wallet (`KeyedMutex`). A fila só ordena os pedidos dentro de uma instância; entre instâncias, a
+ * disputa pela mesma wallet acontece de verdade no Postgres (`SELECT … FOR UPDATE`, ADR 0003).
+ * Verificado por mutação: sem o `FOR UPDATE`, os cenários 1 e 2 falham.
  */
-const app = useTestApp({ WALLET_LOCK_TIMEOUT_MS: "15000" });
+const env = { WALLET_LOCK_TIMEOUT_MS: "15000" };
+const [i1, i2, i3] = [useTestApp(env), useTestApp(env), useTestApp(env)];
+const instances = [i1, i2, i3];
+/** Instância `i` (round-robin): cada pedido paralelo cai numa instância diferente da anterior. */
+const at = (i: number) => (instances[i % instances.length] ?? i1)();
+const app = () => at(0);
 
 const debits = async (walletId: string) =>
   (
@@ -32,8 +39,8 @@ describe("concorrência na mesma wallet", () => {
     const w = await createWallet(app(), "100.00");
     const bet = wagerBody(w, { kind: "BET", amount: "25.00" });
     const responses = await Promise.all(
-      Array.from({ length: 50 }, () =>
-        app().request("POST", "/wagering/transactions", {
+      Array.from({ length: 50 }, (_, i) =>
+        at(i).request("POST", "/wagering/transactions", {
           body: bet.body,
           headers: { "idempotency-key": bet.idempotencyKey },
         }),
@@ -57,8 +64,8 @@ describe("concorrência na mesma wallet", () => {
     await Promise.all(
       wallets.map(async (w) => {
         const [a, b] = await Promise.all([
-          submitWager(app(), w, { kind: "BET", amount: "80.00" }),
-          submitWager(app(), w, { kind: "BET", amount: "80.00" }),
+          submitWager(at(0), w, { kind: "BET", amount: "80.00" }),
+          submitWager(at(1), w, { kind: "BET", amount: "80.00" }),
         ]);
         const outcomes = [a, b].map((r) => `${r.status}:${r.body.status}:${r.body.failureCode}`);
         expect(outcomes.sort()).toEqual(["201:PROCESSED:null", "422:REJECTED:INSUFFICIENT_FUNDS"]);
@@ -73,8 +80,9 @@ describe("concorrência na mesma wallet", () => {
     const w = await createWallet(app(), "100.00");
     const a = wagerBody(w, { kind: "BET", amount: "80.00" });
     const b = wagerBody(w, { kind: "BET", amount: "80.00" });
+    let n = 0;
     const send = (x: typeof a) =>
-      app().request("POST", "/wagering/transactions", {
+      at(n++).request("POST", "/wagering/transactions", {
         body: x.body,
         headers: { "idempotency-key": x.idempotencyKey },
       });
@@ -94,7 +102,7 @@ describe("concorrência na mesma wallet", () => {
   test("hot wallet: 100 BETs distintas de 1.00 sobre 50.00 → exatamente 50 aplicadas, saldo 0.00", async () => {
     const w = await createWallet(app(), "50.00");
     const responses = await Promise.all(
-      Array.from({ length: 100 }, () => submitWager(app(), w, { kind: "BET", amount: "1.00" })),
+      Array.from({ length: 100 }, (_, i) => submitWager(at(i), w, { kind: "BET", amount: "1.00" })),
     );
     const processed = responses.filter((r) => r.body.status === "PROCESSED");
     const rejected = responses.filter((r) => r.body.failureCode === "INSUFFICIENT_FUNDS");
@@ -114,8 +122,8 @@ describe("concorrência na mesma wallet", () => {
       wallets.map(async (w) => {
         const bet = await submitWager(app(), w, { kind: "BET", amount: "30.00" });
         const reversals = await Promise.all(
-          ["REFUND", "ROLLBACK", "REFUND", "ROLLBACK"].map((kind) =>
-            submitWager(app(), w, {
+          ["REFUND", "ROLLBACK", "REFUND", "ROLLBACK"].map((kind, i) =>
+            submitWager(at(i), w, {
               kind,
               amount: "30.00",
               referenceExternalTransactionId: bet.externalTransactionId,
@@ -147,8 +155,8 @@ describe("concorrência na mesma wallet", () => {
           idempotencyKey: key,
         });
       const [r1, r2] = await Promise.all(
-        [make(w1), make(w2)].map((x) =>
-          app().request("POST", "/wagering/transactions", {
+        [make(w1), make(w2)].map((x, i) =>
+          at(i).request("POST", "/wagering/transactions", {
             body: x.body,
             headers: { "idempotency-key": x.idempotencyKey },
           }),
