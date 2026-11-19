@@ -1,0 +1,52 @@
+# Requisições de exemplo para explorar a API pelo editor.
+# VS Code: extensão "REST Client" (humao.rest-client) → clique em "Send Request" acima de cada bloco.
+# Requer o compose rodando: bun run infra:up  (as chamadas passam pelo nginx → 3 réplicas)
+
+@baseUrl = http://localhost:8080
+
+### Criar wallet com saldo inicial (gera OPENING + lançamento CREDIT na mesma transação)
+# @name createWallet
+POST {{baseUrl}}/wallets
+Content-Type: application/json
+X-Correlation-Id: demo-{{$timestamp}}
+
+{
+  "playerId": "{{$guid}}",
+  "initialBalance": { "amount": "1000.00", "currency": "BRL" }
+}
+
+### Consultar a wallet criada acima
+GET {{baseUrl}}/wallets/{{createWallet.response.body.id}}
+
+### Extrato (mais recente primeiro). Para a próxima página, use ?cursor=<nextCursor>
+GET {{baseUrl}}/wallets/{{createWallet.response.body.id}}/ledger?limit=50
+
+### Reconciliação: saldo armazenado × saldo reconstruído pelo ledger
+POST {{baseUrl}}/wallets/{{createWallet.response.body.id}}/reconciliation
+
+### Mesma wallet de novo (mesmo player + moeda) → 409 WALLET_ALREADY_EXISTS
+POST {{baseUrl}}/wallets
+Content-Type: application/json
+
+{
+  "playerId": "{{createWallet.response.body.playerId}}",
+  "initialBalance": { "amount": "5.00", "currency": "BRL" }
+}
+
+### Valor fora do formato (escala fixa de 2 casas) → 400 INVALID_PAYLOAD
+POST {{baseUrl}}/wallets
+Content-Type: application/json
+
+{
+  "playerId": "{{$guid}}",
+  "initialBalance": { "amount": "10.5", "currency": "BRL" }
+}
+
+### Wallet inexistente → 404 WALLET_NOT_FOUND
+GET {{baseUrl}}/wallets/{{$guid}}
+
+### Health e métricas (sem autenticação)
+GET {{baseUrl}}/health/ready
+
+###
+GET {{baseUrl}}/metrics

@@ -1,4 +1,5 @@
-import { Controller, Get, HttpCode, HttpStatus, ServiceUnavailableException } from "@nestjs/common";
+import { Controller, Get, HttpCode, HttpStatus, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { HealthService, type ReadinessReport } from "./health.service.ts";
 
 /** Sem guard de autenticação, por exigência do CHALLENGE §2 e §9. */
@@ -15,11 +16,9 @@ export class HealthController {
 
   /** Readiness: Postgres e SQS alcançáveis; 503 tira a instância do balanceamento. */
   @Get("ready")
-  async ready(): Promise<ReadinessReport> {
+  async ready(@Res({ passthrough: true }) res: Response): Promise<ReadinessReport> {
     const report = await this.health.readiness();
-    if (report.status !== "ok") {
-      throw new ServiceUnavailableException(report);
-    }
+    if (report.status !== "ok") res.status(HttpStatus.SERVICE_UNAVAILABLE);
     return report;
   }
 }

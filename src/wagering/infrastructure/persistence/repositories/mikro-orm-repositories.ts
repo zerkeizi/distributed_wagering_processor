@@ -4,8 +4,10 @@ import type { InboxMessage } from "../../../../shared/messaging/inbox-message.ts
 import type { OutboxMessage } from "../../../../shared/messaging/outbox-message.ts";
 import type {
   InboxRepository,
+  LedgerChainBreak,
   LedgerPage,
   LedgerRepository,
+  LedgerSummary,
   OutboxRepository,
   WagerTransactionRepository,
   WalletRepository,
@@ -179,6 +181,71 @@ export class MikroOrmLedgerRepository implements LedgerRepository {
       nextBeforeVersion: hasMore ? page.at(-1)?.walletVersion : undefined,
     };
   }
+
+  summarize(walletId: string, options: { maxChainBreaks: number }): Promise<LedgerSummary> {
+    return summarizeLedger(this.em, walletId, options.maxChainBreaks);
+  }
+}
+
+const LEDGER_WITH_PREVIOUS = `
+  select wallet_version, direction, amount, balance_before, balance_after,
+         lag(wallet_version) over w as prev_version,
+         lag(balance_after) over w as prev_after
+    from wallet_ledger_entry
+   where wallet_id = ?
+  window w as (order by wallet_version)
+`;
+
+/** Repositório de leitura agregada do ledger: o banco soma e checa o encadeamento num passe só. */
+async function summarizeLedger(
+  em: EntityManager,
+  walletId: string,
+  maxChainBreaks: number,
+): Promise<LedgerSummary> {
+  const [totals] = await em.execute<
+    {
+      signed_total: string;
+      entries: number;
+      last_version: number | null;
+      last_after: string | null;
+    }[]
+  >(
+    `
+    with e as (${LEDGER_WITH_PREVIOUS})
+    select coalesce(sum(case when direction = 'CREDIT' then amount else -amount end), 0)::numeric(20, 2)::text
+             as signed_total,
+           count(*)::int as entries,
+           max(wallet_version) as last_version,
+           (select balance_after::text from e order by wallet_version desc limit 1) as last_after
+      from e
+    `,
+    [walletId],
+  );
+  const breaks = await em.execute<{ wallet_version: number; kind: LedgerChainBreak["kind"] }[]>(
+    `
+    with e as (${LEDGER_WITH_PREVIOUS})
+    select wallet_version,
+           case
+             when prev_version is null then 'FIRST_ENTRY_NOT_FROM_ZERO'
+             when prev_version <> wallet_version - 1 then 'VERSION_GAP'
+             else 'BALANCE_DISCONTINUITY'
+           end as kind
+      from e
+     where (prev_version is null and balance_before <> 0)
+        or (prev_version is not null
+            and (prev_version <> wallet_version - 1 or prev_after <> balance_before))
+     order by wallet_version
+     limit ?
+    `,
+    [walletId, maxChainBreaks],
+  );
+  return {
+    signedTotal: totals?.signed_total ?? "0.00",
+    entries: totals?.entries ?? 0,
+    lastVersion: totals?.last_version ?? undefined,
+    lastBalanceAfter: totals?.last_after ?? undefined,
+    chainBreaks: breaks.map((b) => ({ walletVersion: b.wallet_version, kind: b.kind })),
+  };
 }
 
 export class MikroOrmInboxRepository implements InboxRepository {

@@ -18,6 +18,11 @@ export interface TransactionScope {
 export interface TransactionOptions {
   /** Tempo máximo esperando lock de linha antes de falhar com LockTimeoutError (ADR 0003). */
   readonly lockTimeoutMs?: number;
+  /**
+   * `snapshot`: REPEATABLE READ read-only — todas as leituras enxergam o mesmo instante do banco,
+   * sem travar nada (usado pela reconciliação). Default: READ COMMITTED.
+   */
+  readonly isolation?: "read-committed" | "snapshot";
 }
 
 /**

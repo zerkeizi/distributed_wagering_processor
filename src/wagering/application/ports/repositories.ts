@@ -49,6 +49,22 @@ export interface LedgerPage {
   readonly nextBeforeVersion: number | undefined;
 }
 
+/** Agregado do ledger de uma wallet, calculado pelo banco num único passe (reconciliação). */
+export interface LedgerSummary {
+  /** Soma com sinal (créditos − débitos), em string decimal. */
+  readonly signedTotal: string;
+  readonly entries: number;
+  readonly lastVersion: number | undefined;
+  readonly lastBalanceAfter: string | undefined;
+  /** Versões onde o encadeamento quebra: buraco de versão ou `balance_before` ≠ `balance_after` anterior. */
+  readonly chainBreaks: readonly LedgerChainBreak[];
+}
+
+export interface LedgerChainBreak {
+  readonly walletVersion: number;
+  readonly kind: "VERSION_GAP" | "BALANCE_DISCONTINUITY" | "FIRST_ENTRY_NOT_FROM_ZERO";
+}
+
 export interface LedgerRepository {
   /** Append-only: não existe update nem delete (CHALLENGE §5.5). */
   append(entry: WalletLedgerEntry): void;
@@ -58,6 +74,8 @@ export interface LedgerRepository {
     walletId: string,
     options: { limit: number; beforeVersion?: number },
   ): Promise<LedgerPage>;
+  /** `maxChainBreaks` limita quantas quebras são devolvidas (o total de lançamentos é sempre exato). */
+  summarize(walletId: string, options: { maxChainBreaks: number }): Promise<LedgerSummary>;
 }
 
 export interface InboxRepository {

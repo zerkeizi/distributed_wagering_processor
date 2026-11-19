@@ -19,7 +19,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   INSTANCE_ID: z.string().min(1).optional(),
-  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   ROLES: rolesSchema,
   DATABASE_URL: z
     .string()
@@ -38,7 +38,7 @@ export interface AppConfig {
   readonly env: "development" | "test" | "production";
   readonly port: number;
   readonly instanceId: string;
-  readonly logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace";
+  readonly logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   readonly roles: readonly Role[];
   readonly database: { readonly url: string };
   readonly aws: {

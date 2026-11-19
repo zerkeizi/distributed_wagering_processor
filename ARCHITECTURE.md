@@ -91,10 +91,23 @@ As migrations rodam num passo separado (serviço `migrate` do compose, `bun run 
 
 | Classe | Códigos | Ação do provider |
 |---|---|---|
-| Corrigir o payload | `INVALID_PAYLOAD`, `UNSUPPORTED_KIND`, `REFERENCE_REQUIRED`, `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH`, `WALLET_NOT_FOUND`, `IDEMPOTENCY_KEY_CONFLICT`, `EXTERNAL_ID_CONFLICT` | Não reenviar igual; corrigir os dados ou a chave |
+| Corrigir o payload | `INVALID_PAYLOAD`, `UNSUPPORTED_KIND`, `REFERENCE_REQUIRED`, `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH`, `WALLET_NOT_FOUND`, `WALLET_ALREADY_EXISTS`, `IDEMPOTENCY_KEY_CONFLICT`, `EXTERNAL_ID_CONFLICT` | Não reenviar igual; corrigir os dados ou a chave |
 | Rejeição de negócio (terminal) | `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `REFERENCE_KIND_NOT_ALLOWED`, `REFERENCE_NOT_PROCESSED`, `REFERENCE_ALREADY_REVERSED`, `AMOUNT_MISMATCH` | Desistir; um reenvio devolve o mesmo resultado |
 | Transitória | `TEMPORARILY_UNAVAILABLE`, `LOCK_TIMEOUT` | Reenviar a mesma requisição (com a mesma idempotency key) |
 | Falha interna (terminal) | `INTERNAL_INVARIANT_VIOLATION` | Escalar para suporte; ver ADR 0011 |
+
+**Envelope de erro HTTP** (igual em todos os endpoints):
+
+```json
+{ "error": { "code": "INVALID_PAYLOAD", "message": "invalid body",
+             "details": [{ "path": "initialBalance.amount", "message": "..." }],
+             "correlationId": "..." } }
+```
+
+- `details` só aparece em erro de validação.
+- Respostas `503` trazem `Retry-After`.
+- Erros que não estão no mapeamento (bugs) viram `500 INTERNAL_ERROR`, sem detalhes na resposta; o stack fica só no log.
+- Status de cada código: ADR 0010. `WALLET_ALREADY_EXISTS` → `409`.
 
 ## Interpretações adicionais das regras de negócio
 
@@ -135,9 +148,20 @@ Uma única imagem, com papéis ligados por env: `api`, `consumer`, `outbox-publi
 
 > CHALLENGE §9 Reconciliação
 
-A reconciliação lê a wallet e o ledger num snapshot `REPEATABLE READ`, sem lock, para não travar a hot wallet. Ela soma o ledger e também valida o encadeamento: cada `balance_before` é igual ao `balance_after` anterior, e as versões não têm buracos. Divergências são logadas, contadas em métrica e retornadas com `consistent: false` e a lista de anomalias. Nada é corrigido automaticamente.
+A reconciliação lê a wallet e o ledger num snapshot `REPEATABLE READ`, sem lock, para não travar a hot wallet. Ela soma o ledger e também valida o encadeamento: cada `balance_before` é igual ao `balance_after` anterior, e as versões não têm buracos. A soma e a checagem são feitas pelo próprio Postgres, num único passe com funções de janela, sem trazer o ledger inteiro para a aplicação.
 
-O extrato (`GET /wallets/:id/ledger`) vai do mais recente para o mais antigo, com cursor opaco (base64 de `wallet_version`).
+Anomalias reportadas:
+
+| Anomalia | Significado |
+|---|---|
+| `BALANCE_MISMATCH` | saldo armazenado ≠ soma com sinal do ledger |
+| `LAST_ENTRY_MISMATCH` | saldo armazenado ≠ `balance_after` do último lançamento |
+| `VERSION_MISMATCH` | `version` da wallet ≠ versão do último lançamento |
+| `VERSION_GAP` / `BALANCE_DISCONTINUITY` / `FIRST_ENTRY_NOT_FROM_ZERO` | quebra no encadeamento do ledger (até 20 são listadas) |
+
+Divergências são logadas (`warn`, com o `walletId`, a diferença e os tipos de anomalia, sem saldos completos), contadas em `wagering_reconciliation_divergences_total` e retornadas com `consistent: false`. Nada é corrigido automaticamente. Com as triggers do schema, uma divergência só aparece se alguém passar por cima delas (por exemplo, um superusuário com `session_replication_role = replica`, que é como o teste simula a corrupção).
+
+O extrato (`GET /wallets/:id/ledger`) vai do mais recente para o mais antigo, com `limit` de 1 a 200 (padrão 50) e cursor opaco (base64url de `{walletId, walletVersion}`). O cursor é estável porque o ledger é append-only e ordenado por versão: lançamentos novos entram no topo e nunca deslocam as páginas seguintes. Um cursor de outra wallet é recusado.
 
 ## Limitações
 

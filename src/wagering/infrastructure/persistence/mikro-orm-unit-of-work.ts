@@ -1,4 +1,4 @@
-import type { MikroORM } from "@mikro-orm/postgresql";
+import { IsolationLevel, type MikroORM } from "@mikro-orm/postgresql";
 import type {
   TransactionOptions,
   TransactionScope,
@@ -22,7 +22,7 @@ export class MikroOrmUnitOfWork implements UnitOfWork {
           await em.execute(`set local lock_timeout = ${ms}`);
         }
         return work(createTransactionScope(em));
-      });
+      }, isolationOptions(options));
     } catch (error) {
       throw translatePersistenceError(error);
     }
@@ -35,4 +35,10 @@ export class MikroOrmUnitOfWork implements UnitOfWork {
       throw translatePersistenceError(error);
     }
   }
+}
+
+function isolationOptions(options: TransactionOptions) {
+  return options.isolation === "snapshot"
+    ? { isolationLevel: IsolationLevel.REPEATABLE_READ, readOnly: true }
+    : { isolationLevel: IsolationLevel.READ_COMMITTED };
 }
