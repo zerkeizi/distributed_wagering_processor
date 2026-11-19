@@ -103,6 +103,51 @@ Premissas da CHALLENGE §3 que também têm teste próprio:
 
 Tudo isso tem teste unitário. O nginx só tenta outra réplica quando a réplica não respondeu (`error`, `timeout`, `502`); um `503` da aplicação é resposta deliberada e vai direto ao cliente.
 
+## Persistência e estratégia transacional
+
+> CHALLENGE §4 ("a escolha, o mapeamento do `Money` e a estratégia transacional adotada devem ser justificados em `ARCHITECTURE.md`"); ADRs 0001, 0002, 0003
+
+### Por que MikroORM
+
+MikroORM 7, a opção preferencial do enunciado, pelos três recursos que este sistema usa de fato:
+
+- **Unit of Work:** as mudanças registradas durante a operação viram SQL num único flush, no commit.
+- **Identity Map:** dentro de uma operação, cada linha é carregada uma vez e as alterações são calculadas por diferença.
+- **`em.transactional()` + `LockMode`:** dão a transação e o `SELECT … FOR UPDATE` da wallet sem SQL escrito à mão.
+
+O domínio não depende do ORM (ADR 0001). As tabelas são mapeadas por `EntitySchema` para classes "record" simples (`records.ts`), e mappers convertem record ↔ agregado, usando `rehydrate` na leitura. Mapear os agregados diretamente obrigaria o ORM a preencher campos privados e a contornar construtores privados. O schema real vem de uma migration escrita à mão (CHECKs, índices parciais, triggers); os `EntitySchema` descrevem só colunas e tipos.
+
+### Mapeamento do `Money`
+
+| Camada | Representação |
+|---|---|
+| Domínio | `bigint` de centavos + código da moeda; nenhum `number` (ADR 0002) |
+| Contrato (HTTP, SQS, eventos) | `{ "amount": "25.00", "currency": "BRL" }`, sempre com 2 casas |
+| Banco | valor em `NUMERIC(20,2)`, moeda em `CHAR(3)`, **em colunas separadas** |
+| ORM | o `NUMERIC` é lido e gravado como **string** (`"975.00"`), nunca como `number` |
+
+A conversão fica nos mappers, e não num `Type` customizado do ORM, porque o valor e a moeda estão em colunas diferentes e um `Type` enxerga uma coluna só. Na leitura, o mapper reusa o parser estrito de `Money.from`: um valor fora do formato no banco faz a leitura falhar com erro claro, em vez de virar um saldo errado.
+
+### Estratégia transacional
+
+| Situação | Como |
+|---|---|
+| **Operação que altera saldo de wallet existente** (submissão, worker de pendentes) | `em.fork().transactional()` em `READ COMMITTED`. O **primeiro** comando é `SELECT … FOR UPDATE` na wallet (`LockMode.PESSIMISTIC_WRITE`, com `refresh` para ir ao banco mesmo se a linha já estiver no identity map), com `SET LOCAL lock_timeout` (`WALLET_LOCK_TIMEOUT_MS`). Transação, lançamento, saldo, outbox e inbox são registrados no Unit of Work e confirmados num único commit (ADR 0003). |
+| **Abertura de wallet** | Uma transação com wallet, `OPENING`, lançamento e eventos. Não há linha para travar: duas criações simultâneas para o mesmo player e moeda são resolvidas pela constraint `UNIQUE (player_id, currency)`, e a perdedora recebe `409` (teste com 10 criações simultâneas). |
+| **Ordem de locks** | Sempre wallet → transações. Submissão e worker de pendentes seguem a mesma ordem, então não há deadlock entre eles. |
+| **Reconciliação** | `REPEATABLE READ` **read-only**: wallet e ledger lidos no mesmo snapshot, sem lock, sem travar a hot wallet. |
+| **Consultas** (`GET`) | `EntityManager` próprio, sem transação explícita (cada query em autocommit). |
+| **Isolamento entre operações** | Cada operação usa um `EntityManager` próprio (`fork()`); o global é proibido (`allowGlobalContext: false`). Identity maps nunca vazam entre requisições. |
+| **Ordem dos `INSERT`s** | Os records não declaram relações, então o Unit of Work não ordena os `INSERT`s por dependência. Todas as FKs são `DEFERRABLE INITIALLY DEFERRED` e verificadas no commit, junto com a trigger que amarra o saldo ao último lançamento. |
+| **Erros** | Exceções do driver são traduzidas na borda do Unit of Work para erros da aplicação (`UniqueViolationError` com o nome da constraint, `LockTimeoutError`, `PersistenceUnavailableError`). Os use cases não conhecem o MikroORM. |
+| **Pool** | Até 10 conexões por instância, timeout de conexão de 2 s (`DATABASE_CONNECT_TIMEOUT_MS`), datas em UTC. |
+
+**Onde o Unit of Work é contornado, de propósito:**
+
+1. **Reagendar as pendentes que esperavam por uma transação** (`rescheduleWaitingOn`): é um `UPDATE` direto (`nativeUpdate`) dentro da mesma transação, porque essas linhas não foram carregadas no scope e carregá-las só para mudar um campo seria desperdício.
+2. **Publisher da outbox:** cada passo (reservar, marcar publicado, agendar retry) é um único statement em autocommit. O claim é `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING`. Nenhuma transação fica aberta enquanto o SQS responde (ADR 0013).
+3. **Agregações da reconciliação:** a soma e a checagem de encadeamento são SQL com funções de janela, calculadas pelo Postgres num único passe, sem carregar o ledger inteiro na memória.
+
 ## Schema: garantias aplicadas pelo banco
 
 > CHALLENGE §5.9 ("unicidade, imutabilidade e não-negatividade… no schema do banco, não apenas em código de aplicação")
