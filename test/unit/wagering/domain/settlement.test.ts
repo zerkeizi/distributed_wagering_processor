@@ -321,6 +321,66 @@ describe("ROLLBACK", () => {
   });
 });
 
+describe("interpretações documentadas no ARCHITECTURE (CHALLENGE §7)", () => {
+  test("vários WINs podem referenciar a mesma BET, com valores livres", () => {
+    const wallet = openWallet("100.00");
+    const bet = processedBet(wallet, "10.00");
+    for (const amount of ["5.00", "250.00", "0.01"]) {
+      const win = wager(Kind.Win, {
+        money: brl(amount),
+        referenceExternalTransactionId: bet.externalTransactionId,
+      });
+      expect(run(win, wallet, bet).status).toBe(Status.Processed);
+    }
+    expect(wallet.balance.amount).toBe("345.01");
+  });
+
+  test("REFUND desfeito por ROLLBACK não libera um novo REFUND da mesma BET", () => {
+    const wallet = openWallet("100.00");
+    const bet = processedBet(wallet, "20.00");
+    const refund = wager(Kind.Refund, {
+      money: brl("20.00"),
+      referenceExternalTransactionId: bet.externalTransactionId,
+    });
+    run(refund, wallet, bet);
+    const undo = wager(Kind.Rollback, {
+      money: brl("20.00"),
+      referenceExternalTransactionId: refund.externalTransactionId,
+    });
+    expect(run(undo, wallet, refund).status).toBe(Status.Processed);
+    expect(wallet.balance.amount).toBe("80.00"); // a aposta voltou a estar debitada
+    // A BET continua sendo alvo de um reversal PROCESSED (o REFUND): a busca no banco diz alreadyReversed.
+    const again = wager(Kind.Refund, {
+      money: brl("20.00"),
+      referenceExternalTransactionId: bet.externalTransactionId,
+    });
+    expect(run(again, wallet, bet, true)).toEqual({
+      status: Status.Rejected,
+      failureCode: FailureCode.ReferenceAlreadyReversed,
+    });
+    expect(wallet.balance.amount).toBe("80.00");
+  });
+
+  test("REFUND de BET já liquidada (com WIN) é aceito: a semântica da rodada é do provider", () => {
+    const wallet = openWallet("100.00");
+    const bet = processedBet(wallet, "10.00");
+    run(
+      wager(Kind.Win, {
+        money: brl("50.00"),
+        referenceExternalTransactionId: bet.externalTransactionId,
+      }),
+      wallet,
+      bet,
+    );
+    const refund = wager(Kind.Refund, {
+      money: brl("10.00"),
+      referenceExternalTransactionId: bet.externalTransactionId,
+    });
+    expect(run(refund, wallet, bet).status).toBe(Status.Processed);
+    expect(wallet.balance.amount).toBe("150.00"); // aposta devolvida, prêmio mantido
+  });
+});
+
 describe("pertencimento da referência (CHALLENGE §7.2)", () => {
   const cases: [string, Partial<Parameters<typeof wager>[1]>][] = [
     ["outra rodada", { roundId: "round-000" }],

@@ -7,3 +7,6 @@ A regra 7.4 diz que uma referência "não pode ser revertida duas vezes **pelo m
 ## Consequences
 
 Pelo mesmo motivo, `WIN` e `LOSS` podem referenciar uma `BET` opcionalmente. Quando referenciam, valem as mesmas validações (mesmo provider, player, wallet, moeda e round; alvo `BET` `PROCESSED`). Uma referência ausente leva a `PENDING_REFERENCE`, e uma `BET` já revertida leva a `REJECTED` com `REFERENCE_ALREADY_REVERSED`.
+
+Exemplo do que a regra implica: em `BET` → `REFUND` → `ROLLBACK` do `REFUND`, a aposta volta a estar debitada, mas um segundo `REFUND` da mesma `BET` é recusado (`REFERENCE_ALREADY_REVERSED`), porque ela já foi alvo de um reversal aplicado. Reversões não se empilham sobre o mesmo alvo.
+
