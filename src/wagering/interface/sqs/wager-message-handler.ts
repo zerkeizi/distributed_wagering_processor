@@ -4,6 +4,7 @@ import { InboxMessage } from "../../../shared/messaging/inbox-message.ts";
 import { runWithLogContext } from "../../../shared/observability/log-context.ts";
 import {
   LockTimeoutError,
+  PersistenceBusyError,
   PersistenceUnavailableError,
   UniqueViolationError,
 } from "../../application/ports/persistence-errors.ts";
@@ -176,7 +177,8 @@ export class WagerMessageHandler {
     if (error instanceof PersistenceUnavailableError) {
       return { action: "retry", reason: "dependency_unavailable", detail: error.name };
     }
-    if (error instanceof LockTimeoutError) {
+    if (error instanceof LockTimeoutError || error instanceof PersistenceBusyError) {
+      // Problema desta wallet ou sobrecarga desta instância: só esta mensagem espera, sem pausar o consumer.
       return { action: "retry", reason: "transient", detail: error.name };
     }
     // Inesperado (bug?): tenta de novo; se persistir, o redrive do SQS leva para a DLQ.

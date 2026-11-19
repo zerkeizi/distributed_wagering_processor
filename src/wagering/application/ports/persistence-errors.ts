@@ -22,6 +22,17 @@ export class LockTimeoutError extends Error {
   }
 }
 
+/**
+ * O banco está no ar, mas o pool de conexões DESTA instância esgotou (sobrecarga). Transitório como
+ * a indisponibilidade, mas não é queda do banco: não deve pausar o consumer (circuit breaker).
+ */
+export class PersistenceBusyError extends Error {
+  constructor(options?: { cause?: unknown }) {
+    super("database connection pool exhausted", options);
+    this.name = "PersistenceBusyError";
+  }
+}
+
 /** Banco indisponível ou conexão perdida: transitório. */
 export class PersistenceUnavailableError extends Error {
   constructor(options?: { cause?: unknown }) {

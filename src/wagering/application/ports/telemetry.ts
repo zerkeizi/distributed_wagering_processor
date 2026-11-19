@@ -20,7 +20,7 @@ export interface WageringTelemetry {
   /** Reenvio servido sem novo efeito: `idempotent_replay` (mesma key) ou `inbox` (mesmo messageId). */
   duplicateDetected(source: "idempotent_replay" | "inbox"): void;
   idempotencyConflict(code: string): void;
-  lockConflict(type: "lock_timeout" | "deadlock"): void;
+  lockConflict(type: "lock_timeout" | "deadlock" | "pool_exhausted"): void;
   retryScheduled(component: "sqs_consumer" | "outbox_publisher" | "pending_reference_worker"): void;
   deadLettered(reason: string): void;
   dlqDepthObserved(depth: number): void;

@@ -30,7 +30,7 @@ export class WageringTelemetryAdapter implements WageringTelemetry {
     this.metrics.idempotencyConflicts.inc({ code });
   }
 
-  lockConflict(type: "lock_timeout" | "deadlock"): void {
+  lockConflict(type: "lock_timeout" | "deadlock" | "pool_exhausted"): void {
     this.metrics.lockConflicts.inc({ type });
   }
 

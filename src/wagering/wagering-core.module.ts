@@ -3,6 +3,7 @@ import {
   PROVIDER_IDENTITY,
   UnauthenticatedProviderIdentity,
 } from "../shared/auth/provider-identity.port.ts";
+import { KeyedMutex, WALLET_MUTEX } from "../shared/concurrency/keyed-mutex.ts";
 import type { AppConfig } from "../shared/config/app-config.ts";
 import { APP_CONFIG } from "../shared/config/config.module.ts";
 import { ExponentialBackoff } from "../shared/domain/exponential-backoff.ts";
@@ -26,6 +27,8 @@ import { UNIT_OF_WORK } from "./infrastructure/persistence/persistence.module.ts
  */
 @Module({
   providers: [
+    // Uma fila por processo: HTTP, consumer e worker da mesma instância compartilham a mesma.
+    { provide: WALLET_MUTEX, useValue: new KeyedMutex() },
     { provide: WAGERING_TELEMETRY, useClass: WageringTelemetryAdapter },
     { provide: PROVIDER_IDENTITY, useClass: UnauthenticatedProviderIdentity },
     {
@@ -46,13 +49,14 @@ import { UNIT_OF_WORK } from "./infrastructure/persistence/persistence.module.ts
     },
     {
       provide: SubmitWagerTransaction,
-      inject: [APP_CONFIG, UNIT_OF_WORK, CLOCK, ID_GENERATOR, WAGERING_TELEMETRY],
+      inject: [APP_CONFIG, UNIT_OF_WORK, CLOCK, ID_GENERATOR, WAGERING_TELEMETRY, WALLET_MUTEX],
       useFactory: (
         config: AppConfig,
         uow: UnitOfWork,
         clock: Clock,
         ids: IdGenerator,
         telemetry: WageringTelemetry,
+        walletMutex: KeyedMutex,
       ) => {
         const retry = config.wagering.referenceRetry;
         return new SubmitWagerTransaction({
@@ -65,6 +69,7 @@ import { UNIT_OF_WORK } from "./infrastructure/persistence/persistence.module.ts
             new ExponentialBackoff(retry.baseDelayMs, retry.maxDelayMs),
           ),
           walletLockTimeoutMs: config.wagering.walletLockTimeoutMs,
+          walletMutex,
         });
       },
     },
@@ -81,6 +86,7 @@ import { UNIT_OF_WORK } from "./infrastructure/persistence/persistence.module.ts
     },
   ],
   exports: [
+    WALLET_MUTEX,
     WAGERING_TELEMETRY,
     PROVIDER_IDENTITY,
     CreateWallet,

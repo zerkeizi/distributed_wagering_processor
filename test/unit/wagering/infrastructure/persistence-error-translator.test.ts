@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   LockTimeoutError,
+  PersistenceBusyError,
   PersistenceUnavailableError,
 } from "../../../../src/wagering/application/ports/persistence-errors.ts";
 import { translatePersistenceError } from "../../../../src/wagering/infrastructure/persistence/persistence-error-translator.ts";
@@ -30,6 +31,11 @@ describe("translatePersistenceError — banco indisponível vira 503, nunca 500"
     ],
   ])("%s", (_, error) => {
     expect(translatePersistenceError(error)).toBeInstanceOf(PersistenceUnavailableError);
+  });
+
+  test("pool desta instância esgotado é sobrecarga (PersistenceBusyError), não queda do banco", () => {
+    const error = pgError(undefined, "timeout exceeded when trying to connect");
+    expect(translatePersistenceError(error)).toBeInstanceOf(PersistenceBusyError);
   });
 
   test("lock timeout (55P03) é LockTimeoutError, não indisponibilidade", () => {

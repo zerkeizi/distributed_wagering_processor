@@ -5,6 +5,7 @@ import {
 } from "@mikro-orm/postgresql";
 import {
   LockTimeoutError,
+  PersistenceBusyError,
   PersistenceUnavailableError,
   UniqueViolationError,
 } from "../../application/ports/persistence-errors.ts";
@@ -32,7 +33,12 @@ const UNAVAILABLE_ERRNO = new Set([
 ]);
 /** Mensagens do driver `pg` quando a conexão cai ou não abre (também sem SQLSTATE). */
 const UNAVAILABLE_MESSAGE =
-  /connection terminated|connection timeout|timeout exceeded when trying to connect|client has encountered a connection error|connection refused/i;
+  /connection terminated|connection timeout|client has encountered a connection error|connection refused/i;
+/**
+ * Mensagem do `pg-pool` quando a requisição esperou demais na fila do PRÓPRIO pool (todas as conexões
+ * ocupadas). O banco está no ar: é sobrecarga desta instância, não indisponibilidade.
+ */
+const POOL_EXHAUSTED_MESSAGE = /timeout exceeded when trying to connect/i;
 
 /** Converte exceções do driver em erros da aplicação; erros de domínio passam intactos. */
 export function translatePersistenceError(error: unknown): unknown {
@@ -43,6 +49,9 @@ export function translatePersistenceError(error: unknown): unknown {
   }
   const code = (error as { code?: unknown } | null)?.code;
   if (code === "55P03") return new LockTimeoutError({ cause: error });
+  if (error instanceof Error && code === undefined && POOL_EXHAUSTED_MESSAGE.test(error.message)) {
+    return new PersistenceBusyError({ cause: error });
+  }
   if (isUnavailable(error, code)) return new PersistenceUnavailableError({ cause: error });
   if (error instanceof DriverException) return error;
   return error;

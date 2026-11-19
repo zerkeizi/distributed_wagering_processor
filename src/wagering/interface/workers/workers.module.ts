@@ -2,6 +2,7 @@ import type { SQSClient } from "@aws-sdk/client-sqs";
 import { MikroORM } from "@mikro-orm/postgresql";
 import { type DynamicModule, Module, type Provider } from "@nestjs/common";
 import { PinoLogger } from "nestjs-pino";
+import { type KeyedMutex, WALLET_MUTEX } from "../../../shared/concurrency/keyed-mutex.ts";
 import type { AppConfig, Role } from "../../../shared/config/app-config.ts";
 import { APP_CONFIG } from "../../../shared/config/config.module.ts";
 import { ExponentialBackoff } from "../../../shared/domain/exponential-backoff.ts";
@@ -52,7 +53,15 @@ const outboxProviders: Provider[] = [
 const pendingReferenceProviders: Provider[] = [
   {
     provide: ResolvePendingReferences,
-    inject: [UNIT_OF_WORK, CLOCK, ID_GENERATOR, WAGERING_TELEMETRY, APP_CONFIG, PinoLogger],
+    inject: [
+      UNIT_OF_WORK,
+      CLOCK,
+      ID_GENERATOR,
+      WAGERING_TELEMETRY,
+      APP_CONFIG,
+      PinoLogger,
+      WALLET_MUTEX,
+    ],
     useFactory: (
       uow: UnitOfWork,
       clock: Clock,
@@ -60,6 +69,7 @@ const pendingReferenceProviders: Provider[] = [
       telemetry: WageringTelemetry,
       config: AppConfig,
       logger: PinoLogger,
+      walletMutex: KeyedMutex,
     ) => {
       const retry = config.wagering.referenceRetry;
       logger.setContext("ResolvePendingReferences");
@@ -73,6 +83,7 @@ const pendingReferenceProviders: Provider[] = [
           new ExponentialBackoff(retry.baseDelayMs, retry.maxDelayMs),
         ),
         walletLockTimeoutMs: config.wagering.walletLockTimeoutMs,
+        walletMutex,
         batchSize: config.pendingReferences.batchSize,
         onFailure: (transactionId, error) =>
           logger.error(

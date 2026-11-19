@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { KeyedMutex } from "../../../src/shared/concurrency/keyed-mutex.ts";
 import { ExponentialBackoff } from "../../../src/shared/domain/exponential-backoff.ts";
 import type { WageringTelemetry } from "../../../src/wagering/application/ports/telemetry.ts";
 import { ResolvePendingReferences } from "../../../src/wagering/application/use-cases/resolve-pending-references.ts";
@@ -115,6 +116,7 @@ describe("worker de PENDING_REFERENCE", () => {
       telemetry: new Proxy({}, { get: () => () => {} }) as WageringTelemetry,
       resolutionPolicy: new ReferenceResolutionPolicy(3, new ExponentialBackoff(100, 200)),
       walletLockTimeoutMs: 2_000,
+      walletMutex: new KeyedMutex(),
       batchSize: 500,
       onFailure: (id) => failures.push(id),
     });

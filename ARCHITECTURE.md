@@ -148,6 +148,40 @@ A conversão fica nos mappers, e não num `Type` customizado do ORM, porque o va
 2. **Publisher da outbox:** cada passo (reservar, marcar publicado, agendar retry) é um único statement em autocommit. O claim é `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING`. Nenhuma transação fica aberta enquanto o SQS responde (ADR 0013).
 3. **Agregações da reconciliação:** a soma e a checagem de encadeamento são SQL com funções de janela, calculadas pelo Postgres num único passe, sem carregar o ledger inteiro na memória.
 
+## Concorrência por wallet
+
+> CHALLENGE §8 ("a estratégia… deve ser justificada em `ARCHITECTURE.md`"), §5.6–§5.8, §14 (lost updates, hot wallet, múltiplas instâncias, locks); ADR 0003
+
+A unidade de concorrência é a `walletId`: operações da mesma wallet acontecem uma de cada vez; wallets diferentes nunca se esperam. São três camadas, cada uma com um papel:
+
+| Camada | O que faz | Por que existe |
+|---|---|---|
+| **1. Fila por wallet na instância** (`KeyedMutex`) | antes de pedir conexão ao pool, a operação entra na fila em memória da sua wallet; só uma por wallet, por instância, segue para o banco | **isolamento**: sem ela, cada requisição de uma hot wallet segura uma conexão enquanto espera o lock, e uma única wallet esgota o pool e trava as outras. Não garante nada entre instâncias: é otimização |
+| **2. Lock da linha da wallet** (`SELECT … FOR UPDATE` + `lock_timeout`) | serializa a mesma wallet **entre instâncias**; o saldo é lido já travado | **correção**: impede o read → calculate → update concorrente (§5.7) |
+| **3. Schema** | `UNIQUE (wallet_id, wallet_version)`, encadeamento do ledger, `CHECK (balance >= 0)`, saldo ↔ ledger nos dois sentidos | **rede de segurança**: se um bug pular a camada 2, o banco ainda recusa o lost update (teste dedicado) |
+
+**Alternativas consideradas** (detalhes no ADR 0003):
+
+- **Lock otimista por `version` com retry.** Descartado. Numa hot wallet, cada commit invalida todas as tentativas concorrentes, e 50 apostas paralelas viram uma tempestade de retries com latência imprevisível. O lock pessimista transforma a disputa numa fila ordenada.
+- **`UPDATE … SET balance = balance - x WHERE balance >= x`, atômico.** Correto para o débito isolado, mas o lançamento precisa de `balance_before`/`balance_after`, e as regras de reference (já revertida, mesma rodada…) precisam ser avaliadas com a wallet estável. Isso vira um lock de qualquer jeito, só que espalhado em SQL.
+- **Ordenação do SQS FIFO por wallet como garantia.** Descartada: a §8 diz que recursos do broker são otimização, e o HTTP nem passa pela fila. O `MessageGroupId = walletId` é usado só para ordenar.
+- **Lock global ou de tabela.** Proibido pela §5.6, e desnecessário: o lock é por linha.
+
+**Esperas e erros:**
+
+- A fila da instância e o lock no banco respeitam, cada um, `WALLET_LOCK_TIMEOUT_MS` (padrão 2 s). Estourou → `503 LOCK_TIMEOUT` com `Retry-After: 1` ("wallet ocupada, reenvie a mesma requisição").
+- Se o **pool** da instância esgotar por sobrecarga geral, o banco está no ar: a resposta é `503 TEMPORARILY_UNAVAILABLE` ("sobrecarregado"), contada em `wagering_lock_conflicts_total{type="pool_exhausted"}`. Isso **não** pausa o consumer; o circuit breaker é só para queda do banco.
+
+**Hot wallet, medido no compose (3 réplicas, valores padrão):**
+
+| | Antes da fila por wallet | Depois |
+|---|---|---|
+| 200 apostas simultâneas na **mesma** wallet | 186 aplicadas, 14 × `503 TEMPORARILY_UNAVAILABLE` (código errado) | 101 aplicadas, 99 × `503 LOCK_TIMEOUT` (código certo) |
+| **Outras** wallets durante a rajada | ~2 s, 3 de 5 falhando | 76–180 ms, todas aplicadas |
+| Correção (lançamentos = sucessos, reconciliação) | ✅ | ✅ |
+
+Operações da mesma wallet são sequenciais por definição; cada uma leva ~20 ms, então uma wallet sustenta ~50 operações por segundo. Uma rajada maior que isso dentro da janela de 2 s recebe `LOCK_TIMEOUT`: um sinal honesto de "esta wallet está ocupada", seguro de reenviar por causa da idempotência. Antes, o tempo extra que fazia mais requisições "caberem" vinha justamente de ocupar o pool e travar as demais wallets. Reduzir o custo por operação (menos idas ao banco por transação) aumentaria esse teto e é trabalho futuro.
+
 ## Schema: garantias aplicadas pelo banco
 
 > CHALLENGE §5.9 ("unicidade, imutabilidade e não-negatividade… no schema do banco, não apenas em código de aplicação")
@@ -388,7 +422,7 @@ Nos testes de concorrência, 3 processos `bun src/main.ts` separados (via `Bun.s
   | `wagering_idempotency_conflicts_total{code}` | conflitos de idempotência |
   | `wagering_retries_total{component}` | retries no consumer, no publisher e no worker |
   | `wagering_dlq_messages_total{reason}` e `wagering_dlq_depth` | mensagens em DLQ |
-  | `wagering_lock_conflicts_total{type}` | conflitos de lock |
+  | `wagering_lock_conflicts_total{type}` | conflitos de lock (`lock_timeout`) e pool esgotado (`pool_exhausted`) |
   | `wagering_consumer_paused` | 1 enquanto o consumer espera o banco voltar |
   | `wagering_outbox_lag_seconds` e `wagering_outbox_pending_events` | outbox lag |
   | `wagering_processing_duration_seconds{channel,outcome}` | latência de processamento (histograma) |
@@ -433,4 +467,5 @@ O extrato (`GET /wallets/:id/ledger`) vai do mais recente para o mais antigo, co
 
 - **Teste de carga (`bun run test:load`)**: fora do escopo desta entrega (CHALLENGE §14, diferenciais opcionais). O plano seria um script Bun próprio com uma mistura de hot wallet e wallets distribuídas contra 3 réplicas, medindo throughput, p50/p95/p99, taxa de erro, lock timeouts e outbox lag, com ambiente e metodologia documentados.
 - Integração com IdP (Keycloak, client-credentials por provider), conforme o ADR 0005.
+- Reduzir as idas ao banco por operação (por exemplo, buscar idempotency key e id externo numa só query) para aumentar o teto de operações por segundo de uma hot wallet.
 - Double-entry ledger com contas de contrapartida.

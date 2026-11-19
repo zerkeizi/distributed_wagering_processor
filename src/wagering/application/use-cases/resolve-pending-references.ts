@@ -1,9 +1,14 @@
+import type { KeyedMutex } from "../../../shared/concurrency/keyed-mutex.ts";
 import { FailureCode } from "../../domain/failure-code.ts";
 import type { ReferenceResolutionPolicy } from "../../domain/reference-resolution-policy.ts";
 import { WagerTransactionStatus } from "../../domain/wager-transaction-kind.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/id-generator.ts";
-import { LockTimeoutError, PersistenceUnavailableError } from "../ports/persistence-errors.ts";
+import {
+  LockTimeoutError,
+  PersistenceBusyError,
+  PersistenceUnavailableError,
+} from "../ports/persistence-errors.ts";
 import type { WageringTelemetry } from "../ports/telemetry.ts";
 import type { UnitOfWork } from "../ports/unit-of-work.ts";
 import { TransactionSettler } from "../transaction-settler.ts";
@@ -15,6 +20,7 @@ export interface ResolvePendingReferencesDeps {
   readonly telemetry: WageringTelemetry;
   readonly resolutionPolicy: ReferenceResolutionPolicy;
   readonly walletLockTimeoutMs: number;
+  readonly walletMutex: KeyedMutex;
   readonly batchSize: number;
   readonly onFailure?: (transactionId: string, error: unknown) => void;
 }
@@ -55,7 +61,11 @@ export class ResolvePendingReferences {
         if (status === WagerTransactionStatus.PendingReference) stillPending++;
         else if (status !== undefined) resolved++;
       } catch (error) {
-        if (error instanceof LockTimeoutError || error instanceof PersistenceUnavailableError) {
+        if (
+          error instanceof LockTimeoutError ||
+          error instanceof PersistenceUnavailableError ||
+          error instanceof PersistenceBusyError
+        ) {
           continue; // transitório: continua vencida, a próxima rodada tenta de novo
         }
         this.deps.onFailure?.(candidate.id, error);
@@ -68,6 +78,10 @@ export class ResolvePendingReferences {
 
   /** @returns o novo status, ou `undefined` se outra instância já tratou esta transação. */
   private resolveOne(transactionId: string, walletId: string) {
+    return this.inWalletQueue(walletId, () => this.resolveLocked(transactionId, walletId));
+  }
+
+  private resolveLocked(transactionId: string, walletId: string) {
     const { uow, clock, telemetry } = this.deps;
     return uow.transactional(
       async (scope) => {
@@ -95,7 +109,21 @@ export class ResolvePendingReferences {
   }
 
   /** Transação separada: a que falhou sofreu rollback. FAILED é terminal e auditável. */
-  private async markFailed(transactionId: string, walletId: string): Promise<void> {
+  private markFailed(transactionId: string, walletId: string): Promise<void> {
+    return this.inWalletQueue(walletId, () => this.markFailedLocked(transactionId, walletId));
+  }
+
+  /** Mesma fila por wallet da submissão: o worker também não segura conexão esperando lock. */
+  private inWalletQueue<T>(walletId: string, task: () => Promise<T>): Promise<T> {
+    return this.deps.walletMutex.run(
+      walletId,
+      this.deps.walletLockTimeoutMs,
+      () => new LockTimeoutError(),
+      task,
+    );
+  }
+
+  private async markFailedLocked(transactionId: string, walletId: string): Promise<void> {
     const { uow, clock, telemetry } = this.deps;
     await uow.transactional(
       async (scope) => {

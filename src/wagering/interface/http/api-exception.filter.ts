@@ -12,6 +12,7 @@ import { currentLogContext } from "../../../shared/observability/log-context.ts"
 import { InvalidRequestError } from "../../application/errors.ts";
 import {
   LockTimeoutError,
+  PersistenceBusyError,
   PersistenceUnavailableError,
 } from "../../application/ports/persistence-errors.ts";
 import { ErrorCode } from "../../domain/error-code.ts";
@@ -89,6 +90,18 @@ export class ApiExceptionFilter implements ExceptionFilter {
       return {
         status: HttpStatus.SERVICE_UNAVAILABLE,
         body: { code: ErrorCode.LockTimeout, message: "wallet is busy, retry the same request" },
+        retryAfterSeconds: 1,
+      };
+    }
+    if (exception instanceof PersistenceBusyError) {
+      // Banco no ar, pool desta instância esgotado: sobrecarga, não queda.
+      this.logger.warn({ err: exception }, "database connection pool exhausted");
+      return {
+        status: HttpStatus.SERVICE_UNAVAILABLE,
+        body: {
+          code: ErrorCode.TemporarilyUnavailable,
+          message: "temporarily overloaded, retry the same request",
+        },
         retryAfterSeconds: 1,
       };
     }

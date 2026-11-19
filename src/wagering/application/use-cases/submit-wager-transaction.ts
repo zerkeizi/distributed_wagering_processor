@@ -1,3 +1,4 @@
+import type { KeyedMutex } from "../../../shared/concurrency/keyed-mutex.ts";
 import { DomainError } from "../../../shared/domain/domain-error.ts";
 import { CurrencyMismatchError, Money, type MoneyProps } from "../../../shared/domain/money.ts";
 import { InboxMessage } from "../../../shared/messaging/inbox-message.ts";
@@ -16,7 +17,11 @@ import type { Wallet } from "../../domain/wallet.ts";
 import { WalletNotFoundError } from "../errors.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/id-generator.ts";
-import { LockTimeoutError, UniqueViolationError } from "../ports/persistence-errors.ts";
+import {
+  LockTimeoutError,
+  PersistenceBusyError,
+  UniqueViolationError,
+} from "../ports/persistence-errors.ts";
 import type { EntryChannel, WageringTelemetry } from "../ports/telemetry.ts";
 import type { TransactionScope, UnitOfWork } from "../ports/unit-of-work.ts";
 import { TransactionSettler } from "../transaction-settler.ts";
@@ -86,6 +91,8 @@ export interface SubmitWagerTransactionDeps {
   readonly telemetry: WageringTelemetry;
   readonly resolutionPolicy: ReferenceResolutionPolicy;
   readonly walletLockTimeoutMs: number;
+  /** Fila por wallet dentro da instância (compartilhada com o worker); ver `KeyedMutex`. */
+  readonly walletMutex: KeyedMutex;
 }
 
 /**
@@ -115,6 +122,7 @@ export class SubmitWagerTransaction {
         telemetry.submissionObserved(command.channel, "conflict", elapsed(startedAt));
       } else {
         if (error instanceof LockTimeoutError) telemetry.lockConflict("lock_timeout");
+        if (error instanceof PersistenceBusyError) telemetry.lockConflict("pool_exhausted");
         telemetry.submissionObserved(command.channel, "error", elapsed(startedAt));
       }
       throw error;
@@ -143,7 +151,7 @@ export class SubmitWagerTransaction {
   }
 
   private async attempt(command: SubmitWagerTransactionCommand): Promise<SubmissionResult> {
-    const { uow, clock, ids } = this.deps;
+    const { clock, ids } = this.deps;
     const now = clock.now();
     // Valida o contrato e calcula o payloadHash ANTES de tocar no banco: entrada inválida não trava nada.
     const candidate = WagerTransaction.create({
@@ -162,7 +170,21 @@ export class SubmitWagerTransaction {
       at: now,
     });
 
-    return uow.transactional(
+    // Fila por wallet ANTES de pedir conexão: uma hot wallet não esgota o pool e não trava as outras.
+    return this.deps.walletMutex.run(
+      candidate.walletId,
+      this.deps.walletLockTimeoutMs,
+      () => new LockTimeoutError(),
+      () => this.applyLocked(command, candidate, now),
+    );
+  }
+
+  private applyLocked(
+    command: SubmitWagerTransactionCommand,
+    candidate: WagerTransaction,
+    now: Date,
+  ): Promise<SubmissionResult> {
+    return this.deps.uow.transactional(
       async (scope) => {
         const wallet = await scope.wallets.findByIdForUpdate(candidate.walletId);
         assertWalletAccepts(wallet, candidate);
