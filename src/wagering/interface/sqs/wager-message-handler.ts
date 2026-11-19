@@ -10,7 +10,7 @@ import {
 import type { WageringTelemetry } from "../../application/ports/telemetry.ts";
 import type { UnitOfWork } from "../../application/ports/unit-of-work.ts";
 import type { SubmitWagerTransaction } from "../../application/use-cases/submit-wager-transaction.ts";
-import { FailureCode } from "../../domain/failure-code.ts";
+import { ErrorCode } from "../../domain/error-code.ts";
 import { canonicalJson } from "../../domain/payload-hash.ts";
 import {
   type WagerTransactionRequestedMessage,
@@ -42,9 +42,9 @@ export type HandlingDecision =
 
 /** Erros de forma do conteúdo: reenviar a mesma mensagem nunca vai funcionar. */
 const PERMANENT_CODES = new Set<string>([
-  FailureCode.InvalidPayload,
-  FailureCode.UnsupportedKind,
-  FailureCode.ReferenceRequired,
+  ErrorCode.InvalidPayload,
+  ErrorCode.UnsupportedKind,
+  ErrorCode.ReferenceRequired,
 ]);
 
 /**

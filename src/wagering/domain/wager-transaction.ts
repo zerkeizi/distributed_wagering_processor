@@ -1,7 +1,8 @@
 import { InvariantViolationError } from "../../shared/domain/domain-error.ts";
 import { InvalidMoneyError, type Money } from "../../shared/domain/money.ts";
+import { ErrorCode } from "./error-code.ts";
 import { InvalidTransactionStateError, InvalidWagerTransactionError } from "./errors.ts";
-import { FailureCode, failureCategory } from "./failure-code.ts";
+import { FailureCode, isBusinessRejection } from "./failure-code.ts";
 import { computeWagerPayloadHash } from "./payload-hash.ts";
 import {
   LedgerDirection,
@@ -113,14 +114,14 @@ export class WagerTransaction {
   static create(props: CreateWagerTransactionProps): WagerTransaction {
     if (!PROVIDER_SUBMITTABLE_KINDS.includes(props.kind)) {
       throw new InvalidWagerTransactionError(
-        FailureCode.UnsupportedKind,
+        ErrorCode.UnsupportedKind,
         `kind ${String(props.kind)} cannot be submitted by a provider`,
       );
     }
     assertIdentifier("providerId", props.providerId);
     if (props.providerId.startsWith(RESERVED_PROVIDER_PREFIX)) {
       throw new InvalidWagerTransactionError(
-        FailureCode.InvalidPayload,
+        ErrorCode.InvalidPayload,
         `providerId cannot start with "${RESERVED_PROVIDER_PREFIX}" (reserved)`,
       );
     }
@@ -144,20 +145,20 @@ export class WagerTransaction {
       assertIdentifier("referenceExternalTransactionId", reference);
       if (reference === props.externalTransactionId) {
         throw new InvalidWagerTransactionError(
-          FailureCode.InvalidPayload,
+          ErrorCode.InvalidPayload,
           "a transaction cannot reference itself",
         );
       }
     }
     if (requiresReference(props.kind) && reference === undefined) {
       throw new InvalidWagerTransactionError(
-        FailureCode.ReferenceRequired,
+        ErrorCode.ReferenceRequired,
         `${props.kind} requires referenceExternalTransactionId`,
       );
     }
     if (props.kind === WagerTransactionKind.Bet && reference !== undefined) {
       throw new InvalidWagerTransactionError(
-        FailureCode.InvalidPayload,
+        ErrorCode.InvalidPayload,
         "BET cannot reference another transaction",
       );
     }
@@ -359,7 +360,7 @@ export class WagerTransaction {
 
   reject(code: FailureCode, at: Date, observedBalance: Money): void {
     this.assertNotTerminal("reject");
-    if (failureCategory(code) !== "business-rejection") {
+    if (!isBusinessRejection(code)) {
       throw new InvariantViolationError(`${code} is not a business rejection code`);
     }
     this._status = WagerTransactionStatus.Rejected;
@@ -371,7 +372,7 @@ export class WagerTransaction {
 
   fail(code: FailureCode, at: Date): void {
     this.assertNotTerminal("fail");
-    if (failureCategory(code) !== "internal") {
+    if (code !== FailureCode.InternalInvariantViolation) {
       throw new InvariantViolationError(`${code} is not an internal failure code`);
     }
     this._status = WagerTransactionStatus.Failed;
@@ -477,7 +478,7 @@ function requiresReference(kind: WagerTransactionKind): boolean {
 function assertIdentifier(field: string, value: unknown, maxLength = MAX_IDENTIFIER_LENGTH): void {
   if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
     throw new InvalidWagerTransactionError(
-      FailureCode.InvalidPayload,
+      ErrorCode.InvalidPayload,
       `${field} must be a non-empty string of at most ${maxLength} characters`,
     );
   }

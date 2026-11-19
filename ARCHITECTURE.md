@@ -118,12 +118,28 @@ As migrations rodam num passo separado (serviço `migrate` do compose, `bun run 
 
 > CHALLENGE §7.2
 
+Há dois conjuntos de códigos, separados também no tipo (`src/wagering/domain/failure-code.ts` e `error-code.ts`), para que o compilador impeça um erro de requisição de ser gravado como resultado de transação.
+
+**`FailureCode`: resultado de uma transação que não foi aplicada.** É gravado em `failure_code`, devolvido no corpo do `422` e nos eventos.
+
 | Classe | Códigos | Ação do provider |
 |---|---|---|
-| Corrigir o payload | `INVALID_PAYLOAD`, `UNSUPPORTED_KIND`, `REFERENCE_REQUIRED`, `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH`, `WALLET_NOT_FOUND`, `WALLET_ALREADY_EXISTS`, `TRANSACTION_NOT_FOUND`, `IDEMPOTENCY_KEY_CONFLICT`, `EXTERNAL_ID_CONFLICT` | Não reenviar igual; corrigir os dados ou a chave |
-| Rejeição de negócio (terminal) | `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `REFERENCE_KIND_NOT_ALLOWED`, `REFERENCE_NOT_PROCESSED`, `REFERENCE_ALREADY_REVERSED`, `AMOUNT_MISMATCH` | Desistir; um reenvio devolve o mesmo resultado |
-| Transitória | `TEMPORARILY_UNAVAILABLE`, `LOCK_TIMEOUT` | Reenviar a mesma requisição (com a mesma idempotency key) |
-| Falha interna (terminal) | `INTERNAL_INVARIANT_VIOLATION` | Escalar para suporte; ver ADR 0011 |
+| Rejeição de negócio (`REJECTED`, terminal) | `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `REFERENCE_KIND_NOT_ALLOWED`, `REFERENCE_NOT_PROCESSED`, `REFERENCE_ALREADY_REVERSED`, `AMOUNT_MISMATCH` | Desistir; um reenvio devolve o mesmo resultado |
+| Falha interna (`FAILED`, terminal) | `INTERNAL_INVARIANT_VIOLATION` | Escalar para suporte (ADR 0011) |
+
+**`ErrorCode`: erro da requisição.** Nada é persistido como transação; vem no envelope `error.code`.
+
+| Classe | Códigos | Status | Ação do provider |
+|---|---|---|---|
+| Corrigir a requisição | `INVALID_PAYLOAD`, `UNSUPPORTED_KIND`, `REFERENCE_REQUIRED`, `PAYLOAD_TOO_LARGE` | `400`/`413` | Corrigir os dados; reenviar igual dá o mesmo erro |
+| Wallet não serve | `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH` | `422` | Corrigir wallet, player ou moeda |
+| Não encontrado / já existe | `WALLET_NOT_FOUND`, `TRANSACTION_NOT_FOUND`, `ROUTE_NOT_FOUND`, `WALLET_ALREADY_EXISTS` | `404`/`409` | Corrigir o identificador |
+| Conflito de idempotência | `IDEMPOTENCY_KEY_CONFLICT`, `EXTERNAL_ID_CONFLICT` | `409` | Não é replay: usar outra key ou corrigir o payload |
+| Autorização | `FORBIDDEN` | `403` | Inativo enquanto não houver IdP (ADR 0005) |
+| Transitória | `TEMPORARILY_UNAVAILABLE`, `LOCK_TIMEOUT` | `503` + `Retry-After` | Reenviar a **mesma** requisição (mesma `Idempotency-Key`) |
+| Bug | `INTERNAL_ERROR` | `500` | Escalar; sem detalhes na resposta |
+
+`LOCK_TIMEOUT` e `TEMPORARILY_UNAVAILABLE` pedem a mesma ação ao provider, mas ficam separados porque, para quem opera, são alertas diferentes: wallet muito disputada versus banco fora do ar. Cada código de rejeição corresponde a uma regra distinta do CHALLENGE §7, então a granularidade custa pouco e ajuda o diagnóstico.
 
 **Envelope de erro HTTP** (igual em todos os endpoints):
 
@@ -134,9 +150,7 @@ As migrations rodam num passo separado (serviço `migrate` do compose, `bun run 
 ```
 
 - `details` só aparece em erro de validação.
-- Respostas `503` trazem `Retry-After`.
-- Erros que não estão no mapeamento (bugs) viram `500 INTERNAL_ERROR`, sem detalhes na resposta; o stack fica só no log.
-- Status de cada código: ADR 0010. `WALLET_ALREADY_EXISTS` → `409`.
+- Status de cada código: tabela acima e ADR 0010.
 
 ## Interpretações adicionais das regras de negócio
 

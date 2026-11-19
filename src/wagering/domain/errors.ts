@@ -1,4 +1,5 @@
 import { DomainError } from "../../shared/domain/domain-error.ts";
+import { ErrorCode } from "./error-code.ts";
 import { FailureCode } from "./failure-code.ts";
 import type { WagerTransactionStatus } from "./wager-transaction-kind.ts";
 
@@ -6,9 +7,9 @@ import type { WagerTransactionStatus } from "./wager-transaction-kind.ts";
 export class InvalidWagerTransactionError extends DomainError {
   constructor(
     override readonly code:
-      | FailureCode.InvalidPayload
-      | FailureCode.UnsupportedKind
-      | FailureCode.ReferenceRequired,
+      | ErrorCode.InvalidPayload
+      | ErrorCode.UnsupportedKind
+      | ErrorCode.ReferenceRequired,
     message: string,
   ) {
     super(code, message);
@@ -23,7 +24,7 @@ export class InsufficientFundsError extends DomainError {
 
 export class WalletPlayerMismatchError extends DomainError {
   constructor(walletId: string) {
-    super(FailureCode.WalletPlayerMismatch, `Wallet ${walletId} does not belong to this player`);
+    super(ErrorCode.WalletPlayerMismatch, `Wallet ${walletId} does not belong to this player`);
   }
 }
 

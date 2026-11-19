@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { InvariantViolationError } from "../../../../src/shared/domain/domain-error.ts";
 import { InvalidMoneyError } from "../../../../src/shared/domain/money.ts";
+import { ErrorCode } from "../../../../src/wagering/domain/error-code.ts";
 import {
   InvalidTransactionStateError,
   InvalidWagerTransactionError,
@@ -39,7 +40,7 @@ describe("WagerTransaction.create — validação por kind", () => {
   });
 
   test.each([Kind.Refund, Kind.Rollback])("%s exige referenceExternalTransactionId", (kind) => {
-    expect(codeOf(() => wager(kind))).toBe(FailureCode.ReferenceRequired);
+    expect(codeOf(() => wager(kind))).toBe(ErrorCode.ReferenceRequired);
   });
 
   test.each([Kind.Win, Kind.Loss])("%s aceita referência opcional", (kind) => {
@@ -51,17 +52,17 @@ describe("WagerTransaction.create — validação por kind", () => {
 
   test("BET não pode referenciar outra transação", () => {
     expect(codeOf(() => wager(Kind.Bet, { referenceExternalTransactionId: "x" }))).toBe(
-      FailureCode.InvalidPayload,
+      ErrorCode.InvalidPayload,
     );
   });
 
   test("OPENING não pode ser submetido por provider", () => {
-    expect(codeOf(() => wager(Kind.Opening))).toBe(FailureCode.UnsupportedKind);
+    expect(codeOf(() => wager(Kind.Opening))).toBe(ErrorCode.UnsupportedKind);
   });
 
   test("provider com prefixo reservado é recusado", () => {
     expect(codeOf(() => wager(Kind.Bet, { providerId: SYSTEM_PROVIDER_ID }))).toBe(
-      FailureCode.InvalidPayload,
+      ErrorCode.InvalidPayload,
     );
   });
 
@@ -70,7 +71,7 @@ describe("WagerTransaction.create — validação por kind", () => {
       codeOf(() =>
         wager(Kind.Rollback, { externalTransactionId: "a", referenceExternalTransactionId: "a" }),
       ),
-    ).toBe(FailureCode.InvalidPayload);
+    ).toBe(ErrorCode.InvalidPayload);
   });
 
   test.each([Kind.Bet, Kind.Win, Kind.Refund])("%s de valor zero é recusado", (kind) => {
@@ -165,7 +166,9 @@ describe("WagerTransaction — transições", () => {
 
   test("reject só aceita códigos de rejeição de negócio", () => {
     const tx = wager(Kind.Bet);
-    expect(() => tx.reject(FailureCode.LockTimeout, T1, brl("1.00"))).toThrow(
+    // Código de requisição (ex.: LOCK_TIMEOUT) nem compila aqui; o que sobra checar em execução é
+    // o código de falha interna, que é persistível mas não é rejeição.
+    expect(() => tx.reject(FailureCode.InternalInvariantViolation, T1, brl("1.00"))).toThrow(
       InvariantViolationError,
     );
     tx.reject(FailureCode.InsufficientFunds, T1, brl("1.00"));

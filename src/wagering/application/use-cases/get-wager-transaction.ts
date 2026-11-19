@@ -1,12 +1,12 @@
 import { DomainError } from "../../../shared/domain/domain-error.ts";
 import type { MoneyProps } from "../../../shared/domain/money.ts";
-import { FailureCode } from "../../domain/failure-code.ts";
+import { ErrorCode } from "../../domain/error-code.ts";
 import type { WagerTransaction } from "../../domain/wager-transaction.ts";
 import type { UnitOfWork } from "../ports/unit-of-work.ts";
 
 export class WagerTransactionNotFoundError extends DomainError {
   constructor(what: string) {
-    super(FailureCode.TransactionNotFound, `Wager transaction ${what} not found`);
+    super(ErrorCode.TransactionNotFound, `Wager transaction ${what} not found`);
   }
 }
 

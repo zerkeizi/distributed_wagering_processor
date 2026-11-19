@@ -1,6 +1,7 @@
 import { DomainError } from "../../../shared/domain/domain-error.ts";
 import { CurrencyMismatchError, Money, type MoneyProps } from "../../../shared/domain/money.ts";
 import { InboxMessage } from "../../../shared/messaging/inbox-message.ts";
+import { ErrorCode } from "../../domain/error-code.ts";
 import { WalletPlayerMismatchError } from "../../domain/errors.ts";
 import { FailureCode } from "../../domain/failure-code.ts";
 import { evaluateReference } from "../../domain/reference-policy.ts";
@@ -60,12 +61,12 @@ export interface SubmissionResult {
 /** Mesma idempotency key com payload diferente, ou mesmo id externo com outra key (ADR 0008). */
 export class IdempotencyConflictError extends DomainError {
   constructor(
-    code: FailureCode.IdempotencyKeyConflict | FailureCode.ExternalIdConflict,
+    code: ErrorCode.IdempotencyKeyConflict | ErrorCode.ExternalIdConflict,
     readonly existingTransactionId: string,
   ) {
     super(
       code,
-      code === FailureCode.IdempotencyKeyConflict
+      code === ErrorCode.IdempotencyKeyConflict
         ? "Idempotency-Key was already used with a different payload"
         : "externalTransactionId was already submitted with a different Idempotency-Key",
     );
@@ -171,7 +172,7 @@ export class SubmitWagerTransaction {
         );
         if (existing) {
           if (!existing.matchesPayload(candidate.payloadHash)) {
-            throw new IdempotencyConflictError(FailureCode.IdempotencyKeyConflict, existing.id);
+            throw new IdempotencyConflictError(ErrorCode.IdempotencyKeyConflict, existing.id);
           }
           this.recordInbox(scope, command, now);
           return this.replay(scope, existing, wallet, now);
@@ -181,7 +182,7 @@ export class SubmitWagerTransaction {
           candidate.externalTransactionId,
         );
         if (sameExternalId) {
-          throw new IdempotencyConflictError(FailureCode.ExternalIdConflict, sameExternalId.id);
+          throw new IdempotencyConflictError(ErrorCode.ExternalIdConflict, sameExternalId.id);
         }
 
         const outcome = await this.settler.settleAndStage(scope, candidate, wallet, now, "add");

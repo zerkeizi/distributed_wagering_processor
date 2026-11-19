@@ -14,23 +14,23 @@ import {
   LockTimeoutError,
   PersistenceUnavailableError,
 } from "../../application/ports/persistence-errors.ts";
-import { FailureCode } from "../../domain/failure-code.ts";
+import { ErrorCode } from "../../domain/error-code.ts";
 
 /**
  * Mapeamento único de erro → status HTTP (ADR 0010), igual para todos os endpoints. O provider
  * decide pelo status e pelo `error.code`, nunca pela mensagem.
  */
 const STATUS_BY_CODE: Readonly<Record<string, number>> = {
-  [FailureCode.InvalidPayload]: HttpStatus.BAD_REQUEST,
-  [FailureCode.UnsupportedKind]: HttpStatus.BAD_REQUEST,
-  [FailureCode.ReferenceRequired]: HttpStatus.BAD_REQUEST,
-  [FailureCode.WalletNotFound]: HttpStatus.NOT_FOUND,
-  [FailureCode.TransactionNotFound]: HttpStatus.NOT_FOUND,
-  [FailureCode.CurrencyMismatch]: HttpStatus.UNPROCESSABLE_ENTITY,
-  [FailureCode.WalletPlayerMismatch]: HttpStatus.UNPROCESSABLE_ENTITY,
-  [FailureCode.WalletAlreadyExists]: HttpStatus.CONFLICT,
-  [FailureCode.IdempotencyKeyConflict]: HttpStatus.CONFLICT,
-  [FailureCode.ExternalIdConflict]: HttpStatus.CONFLICT,
+  [ErrorCode.InvalidPayload]: HttpStatus.BAD_REQUEST,
+  [ErrorCode.UnsupportedKind]: HttpStatus.BAD_REQUEST,
+  [ErrorCode.ReferenceRequired]: HttpStatus.BAD_REQUEST,
+  [ErrorCode.WalletNotFound]: HttpStatus.NOT_FOUND,
+  [ErrorCode.TransactionNotFound]: HttpStatus.NOT_FOUND,
+  [ErrorCode.CurrencyMismatch]: HttpStatus.UNPROCESSABLE_ENTITY,
+  [ErrorCode.WalletPlayerMismatch]: HttpStatus.UNPROCESSABLE_ENTITY,
+  [ErrorCode.WalletAlreadyExists]: HttpStatus.CONFLICT,
+  [ErrorCode.IdempotencyKeyConflict]: HttpStatus.CONFLICT,
+  [ErrorCode.ExternalIdConflict]: HttpStatus.CONFLICT,
 };
 
 export interface ErrorBody {
@@ -88,7 +88,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
       this.logger.warn({ err: exception }, "wallet lock timeout");
       return {
         status: HttpStatus.SERVICE_UNAVAILABLE,
-        body: { code: FailureCode.LockTimeout, message: "wallet is busy, retry the same request" },
+        body: { code: ErrorCode.LockTimeout, message: "wallet is busy, retry the same request" },
         retryAfterSeconds: 1,
       };
     }
@@ -97,7 +97,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
       return {
         status: HttpStatus.SERVICE_UNAVAILABLE,
         body: {
-          code: FailureCode.TemporarilyUnavailable,
+          code: ErrorCode.TemporarilyUnavailable,
           message: "temporarily unavailable, retry the same request",
         },
         retryAfterSeconds: 2,
@@ -111,7 +111,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
     this.logger.error({ err: exception }, "unhandled error");
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
-      body: { code: "INTERNAL_ERROR", message: "internal error" },
+      body: { code: ErrorCode.InternalError, message: "internal error" },
     };
   }
 }
@@ -119,13 +119,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
 function codeForHttpStatus(status: number): string {
   switch (status) {
     case HttpStatus.BAD_REQUEST:
-      return FailureCode.InvalidPayload;
+      return ErrorCode.InvalidPayload;
     case HttpStatus.FORBIDDEN:
-      return "FORBIDDEN";
+      return ErrorCode.Forbidden;
     case HttpStatus.NOT_FOUND:
-      return "ROUTE_NOT_FOUND";
+      return ErrorCode.RouteNotFound;
     case HttpStatus.PAYLOAD_TOO_LARGE:
-      return "PAYLOAD_TOO_LARGE";
+      return ErrorCode.PayloadTooLarge;
     default:
       return `HTTP_${status}`;
   }
