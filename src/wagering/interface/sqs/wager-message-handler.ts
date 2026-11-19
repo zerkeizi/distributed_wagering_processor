@@ -36,7 +36,11 @@ export type HandlingDecision =
   | { readonly action: "dead-letter"; readonly reason: string; readonly detail: string }
   | {
       readonly action: "retry";
-      readonly reason: "transient" | "unexpected";
+      /**
+       * `dependency_unavailable`: o banco caiu — não é problema DESTA mensagem; o consumer pausa.
+       * `transient`: problema pontual (ex.: wallet disputada) — só esta mensagem espera.
+       */
+      readonly reason: "dependency_unavailable" | "transient" | "unexpected";
       readonly detail: string;
     };
 
@@ -99,9 +103,15 @@ export class WagerMessageHandler {
       .update(canonicalJson({ type: envelope.type, data: envelope.data }))
       .digest("hex");
 
-    const seen = await this.uow.read((s) =>
-      s.inbox.find(WAGER_TRANSACTIONS_CONSUMER, envelope.messageId),
-    );
+    let seen: InboxMessage | undefined;
+    try {
+      seen = await this.uow.read((s) =>
+        s.inbox.find(WAGER_TRANSACTIONS_CONSUMER, envelope.messageId),
+      );
+    } catch (error) {
+      // Banco fora já na consulta ao inbox: mesma classificação de quando falha no use case.
+      return this.classify(error, envelope.messageId, payloadHash);
+    }
     if (seen) {
       if (!seen.matchesPayload(payloadHash)) {
         return {
@@ -163,7 +173,10 @@ export class WagerMessageHandler {
       this.logger.warn({ failureCode: error.code }, "message rejected by business rule");
       return { action: "ack", reason: "business_rejected" };
     }
-    if (error instanceof LockTimeoutError || error instanceof PersistenceUnavailableError) {
+    if (error instanceof PersistenceUnavailableError) {
+      return { action: "retry", reason: "dependency_unavailable", detail: error.name };
+    }
+    if (error instanceof LockTimeoutError) {
       return { action: "retry", reason: "transient", detail: error.name };
     }
     // Inesperado (bug?): tenta de novo; se persistir, o redrive do SQS leva para a DLQ.

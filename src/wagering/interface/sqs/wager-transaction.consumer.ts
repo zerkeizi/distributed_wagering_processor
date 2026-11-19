@@ -20,7 +20,10 @@ import { ExponentialBackoff } from "../../../shared/domain/exponential-backoff.t
 import { SQS_CLIENT } from "../../../shared/infrastructure/infrastructure.module.ts";
 import { SqsQueueResolver } from "../../../shared/infrastructure/sqs/sqs-queue-resolver.ts";
 import { crashPoint } from "../../../shared/testing/crash-point.ts";
+import { PersistenceUnavailableError } from "../../application/ports/persistence-errors.ts";
 import { WAGERING_TELEMETRY, type WageringTelemetry } from "../../application/ports/telemetry.ts";
+import type { UnitOfWork } from "../../application/ports/unit-of-work.ts";
+import { UNIT_OF_WORK } from "../../infrastructure/persistence/persistence.module.ts";
 import { type HandlingDecision, WagerMessageHandler } from "./wager-message-handler.ts";
 
 /** SQS limita o visibility timeout a 12 h. */
@@ -42,6 +45,9 @@ interface Tracked {
  * - Ack (DeleteMessage) só depois que o handler devolveu — ou seja, depois do commit.
  * - SIGTERM: para de receber, espera as mensagens em andamento até `SHUTDOWN_GRACE_MS` e devolve
  *   à fila (visibilidade 0) tudo que não terminou.
+ * - Circuit breaker: se o BANCO cai, o consumer para de receber mensagens e só sonda o banco até ele
+ *   voltar. Sem isso, cada mensagem recebida durante a queda gastaria uma das entregas permitidas e,
+ *   numa queda de ~1 min, mensagens válidas iriam para a DLQ (CHALLENGE §3).
  */
 @Injectable()
 export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeApplicationShutdown {
@@ -51,6 +57,9 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
   private current: { readonly batch: Tracked[]; readonly done: Promise<void> } | undefined;
   private dlqTimer: ReturnType<typeof setInterval> | undefined;
   private readonly backoff: ExponentialBackoff;
+  private readonly probeBackoff: ExponentialBackoff;
+  /** Circuit breaker aberto: banco indisponível, nada é recebido até ele responder. */
+  private paused = false;
 
   constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -58,11 +67,13 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
     private readonly queues: SqsQueueResolver,
     @Inject(WagerMessageHandler) private readonly handler: WagerMessageHandler,
     @Inject(WAGERING_TELEMETRY) private readonly telemetry: WageringTelemetry,
+    @Inject(UNIT_OF_WORK) private readonly uow: UnitOfWork,
     private readonly logger: PinoLogger,
   ) {
     this.logger.setContext("WagerTransactionConsumer");
     const c = config.sqs.consumer;
     this.backoff = new ExponentialBackoff(c.retryBaseMs, Math.max(c.retryBaseMs, c.retryMaxMs));
+    this.probeBackoff = new ExponentialBackoff(c.pauseProbeMs, c.pauseProbeMaxMs);
   }
 
   onApplicationBootstrap(): void {
@@ -100,6 +111,10 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
     this.logger.info({ queue: this.config.sqs.wagerQueueName }, "consumer started");
     let failures = 0;
     while (this.running) {
+      if (this.paused) {
+        await this.waitForDatabase();
+        continue;
+      }
       try {
         const res = await this.sqs.send(
           new ReceiveMessageCommand({
@@ -147,6 +162,10 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
     let delayRestSeconds: number | undefined;
     for (const tracked of group) {
       if (!this.running) return; // o shutdown devolve o que sobrou
+      if (this.paused && delayRestSeconds === undefined) {
+        // Outro grupo do lote descobriu que o banco caiu: nem tenta; devolve para depois.
+        delayRestSeconds = this.pauseVisibilitySeconds();
+      }
       if (delayRestSeconds !== undefined) {
         // Uma mensagem do grupo falhou de forma transitória: as seguintes esperam junto, para não
         // passarem na frente dela (preserva a ordem do FIFO).
@@ -169,6 +188,9 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
         correlationId: message.MessageAttributes?.correlationId?.StringValue,
       });
     } catch (error) {
+      if (error instanceof PersistenceUnavailableError) {
+        return { action: "retry", reason: "dependency_unavailable", detail: error.name };
+      }
       this.logger.error({ err: error, sqsMessageId: message.MessageId }, "handler failed");
       return { action: "retry", reason: "unexpected", detail: "handler threw" };
     }
@@ -191,6 +213,13 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
           await this.deadLetter(queueUrl, message, decision.reason, decision.detail);
           return undefined;
         case "retry": {
+          if (decision.reason === "dependency_unavailable") {
+            this.openCircuit();
+            const seconds = this.pauseVisibilitySeconds();
+            await this.changeVisibility(queueUrl, message, seconds);
+            this.telemetry.retryScheduled("sqs_consumer");
+            return seconds;
+          }
           const receiveCount = Number(message.Attributes?.ApproximateReceiveCount ?? "1");
           const seconds = Math.min(
             MAX_VISIBILITY_SECONDS,
@@ -277,6 +306,40 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
         { released: unfinished.length },
         "returned unfinished messages to the queue",
       );
+    }
+  }
+
+  private openCircuit(): void {
+    if (this.paused) return;
+    this.paused = true;
+    this.telemetry.consumerPaused(true);
+    this.logger.warn("database unavailable; consumer paused until it responds again");
+  }
+
+  /** Sonda o banco com backoff até ele responder, sem receber mensagens enquanto isso. */
+  private async waitForDatabase(): Promise<void> {
+    for (let attempt = 1; this.running; attempt++) {
+      try {
+        await this.uow.ping();
+        this.paused = false;
+        this.telemetry.consumerPaused(false);
+        this.logger.info({ probes: attempt }, "database is back; consumer resumed");
+        return;
+      } catch {
+        await this.sleepUnlessStopping(this.probeBackoff.delayMs(attempt));
+      }
+    }
+  }
+
+  /** Visibilidade curta: a mensagem volta logo, mas só é recebida de novo quando o banco voltar. */
+  private pauseVisibilitySeconds(): number {
+    return Math.max(1, Math.ceil(this.config.sqs.consumer.pauseProbeMs / 1000));
+  }
+
+  private async sleepUnlessStopping(ms: number): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (this.running && Date.now() < deadline) {
+      await Bun.sleep(Math.min(200, deadline - Date.now()));
     }
   }
 

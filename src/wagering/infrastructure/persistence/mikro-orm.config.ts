@@ -11,6 +11,7 @@ export const MIGRATIONS = [
 export interface OrmOptionsInput {
   readonly databaseUrl: string;
   readonly poolMax?: number;
+  readonly connectTimeoutMs?: number;
   readonly debug?: boolean;
 }
 
@@ -29,6 +30,9 @@ export function createOrmOptions(input: OrmOptionsInput): Options {
       silent: true,
     },
     pool: { min: 0, max: input.poolMax ?? 10 },
+    // Repassado ao Pool do `pg`. Sem isso, um banco que "engole" pacotes (partição de rede) deixa a
+    // requisição pendurada indefinidamente, em vez de virar 503 TEMPORARILY_UNAVAILABLE.
+    driverOptions: { connectionTimeoutMillis: input.connectTimeoutMs ?? 2_000 },
     forceUtcTimezone: true,
     // Toda operação usa um EntityManager próprio (fork): nunca o global compartilhado.
     allowGlobalContext: false,

@@ -237,6 +237,50 @@ describe("≥ 3 instâncias simultâneas (CHALLENGE §13.4, §13.7)", () => {
 });
 
 describe("crashes", () => {
+  test("processo morto ANTES do commit: nada fica gravado e a reentrega aplica normalmente (CHALLENGE §3)", async () => {
+    const queues = await createTestQueues(5, 3);
+    try {
+      const doomed = await spawn("doomed-before-commit", queues, {
+        ROLES: "api,consumer",
+        FAULT_CRASH_AT: "submit:before-commit",
+      });
+      const w = await createWallet("100.00");
+      const bet = wager(w, "BET", "30.00");
+      await viaQueue(queues, bet);
+
+      await doomed.proc.exited;
+      expect(doomed.proc.signalCode).toBe("SIGKILL");
+      // Morreu com transação, lançamento, saldo, outbox e inbox já registrados — e nada disso existe.
+      expect(
+        await db.sql("select 1 from wager_transaction where external_transaction_id = ?", [
+          bet.ext,
+        ]),
+      ).toHaveLength(0);
+      const [before] = await db.sql<{ balance: string; version: number }>(
+        "select balance::text, version from wallet where id = ?",
+        [w.walletId],
+      );
+      expect(before).toEqual({ balance: "100.00", version: 1 });
+
+      running = running.filter((i) => i !== doomed);
+      await spawn("successor", queues, { ROLES: "api,consumer" });
+      await drained(queues);
+      expect(
+        await db.sql("select 1 from wager_transaction where external_transaction_id = ?", [
+          bet.ext,
+        ]),
+      ).toHaveLength(1);
+      const [after] = await db.sql<{ balance: string }>(
+        "select balance::text from wallet where id = ?",
+        [w.walletId],
+      );
+      expect(after?.balance).toBe("70.00");
+      await assertLedgerConsistent(db, w.walletId);
+    } finally {
+      await queues.destroy();
+    }
+  }, 60_000);
+
   test("worker morto DEPOIS do commit e ANTES do ack: outra instância recebe de novo e o inbox absorve (§13.5)", async () => {
     const queues = await createTestQueues(5, 3); // visibilidade de 3 s: a reentrega vem rápido
     try {

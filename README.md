@@ -149,6 +149,8 @@ Toda a configuração vem de variáveis de ambiente, validadas no boot: um valor
 | `OUTBOX_RETRY_BASE_MS` · `OUTBOX_RETRY_MAX_MS` | `1000` · `60000` | backoff de publicação (sem limite de tentativas) |
 | `PENDING_REFERENCE_POLL_INTERVAL_MS` · `PENDING_REFERENCE_BATCH_SIZE` | `1000` · `50` | worker de referências pendentes |
 | `HEALTH_CHECK_TIMEOUT_MS` | `2000` | timeout de cada sonda do `/health/ready` |
+| `DATABASE_CONNECT_TIMEOUT_MS` | `2000` | espera máxima por uma conexão nova; banco inalcançável vira `503` rápido |
+| `SQS_CONSUMER_PAUSE_PROBE_MS` · `SQS_CONSUMER_PAUSE_PROBE_MAX_MS` | `1000` · `15000` | com o banco fora do ar, o consumer pausa e sonda o banco com este backoff |
 | `FAULT_CRASH_AT` | — | só em testes: crash point (ADR 0016); ignorada em produção |
 
 ## Estrutura

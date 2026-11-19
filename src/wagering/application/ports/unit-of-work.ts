@@ -34,6 +34,8 @@ export interface UnitOfWork {
     work: (scope: TransactionScope) => Promise<T>,
     options?: TransactionOptions,
   ): Promise<T>;
+  /** Sonda o banco (`select 1`). Lança PersistenceUnavailableError se ele não responde. */
+  ping(): Promise<void>;
   /** Leituras fora de transação explícita (consultas). Escritas registradas aqui são descartadas. */
   read<T>(work: (scope: TransactionScope) => Promise<T>): Promise<T>;
 }

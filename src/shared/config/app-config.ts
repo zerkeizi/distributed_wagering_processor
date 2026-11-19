@@ -32,6 +32,9 @@ const envSchema = z.object({
   SQS_WAGER_DLQ_NAME: z.string().endsWith(".fifo").default("wager-transactions-dlq.fifo"),
   SQS_EVENTS_QUEUE_NAME: z.string().endsWith(".fifo").default("wagering-events.fifo"),
   HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+  DATABASE_CONNECT_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+  SQS_CONSUMER_PAUSE_PROBE_MS: z.coerce.number().int().positive().default(1000),
+  SQS_CONSUMER_PAUSE_PROBE_MAX_MS: z.coerce.number().int().positive().default(15_000),
   SQS_CONSUMER_WAIT_SECONDS: z.coerce.number().int().min(0).max(20).default(20),
   SQS_CONSUMER_BATCH_SIZE: z.coerce.number().int().min(1).max(10).default(10),
   SQS_RETRY_BASE_MS: z.coerce.number().int().positive().default(2_000),
@@ -57,7 +60,11 @@ export interface AppConfig {
   readonly instanceId: string;
   readonly logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
   readonly roles: readonly Role[];
-  readonly database: { readonly url: string };
+  readonly database: {
+    readonly url: string;
+    /** Espera máxima por uma conexão nova: banco inalcançável vira 503 rápido, e não requisição pendurada. */
+    readonly connectTimeoutMs: number;
+  };
   readonly aws: {
     readonly region: string;
     readonly endpoint: string | undefined;
@@ -76,6 +83,9 @@ export interface AppConfig {
       /** Backoff de falha transitória, aplicado via ChangeMessageVisibility (ADR 0014). */
       readonly retryBaseMs: number;
       readonly retryMaxMs: number;
+      /** Banco indisponível: consumer pausa e sonda o banco com este backoff até ele voltar. */
+      readonly pauseProbeMs: number;
+      readonly pauseProbeMaxMs: number;
     };
   };
   /** No SIGTERM: quanto esperar mensagens em andamento antes de devolvê-las à fila. */
@@ -127,7 +137,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     instanceId: e.INSTANCE_ID ?? hostname(),
     logLevel: e.LOG_LEVEL,
     roles: e.ROLES,
-    database: { url: e.DATABASE_URL },
+    database: { url: e.DATABASE_URL, connectTimeoutMs: e.DATABASE_CONNECT_TIMEOUT_MS },
     aws: {
       region: e.AWS_REGION,
       endpoint: e.AWS_ENDPOINT_URL,
@@ -145,6 +155,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
         batchSize: e.SQS_CONSUMER_BATCH_SIZE,
         retryBaseMs: e.SQS_RETRY_BASE_MS,
         retryMaxMs: e.SQS_RETRY_MAX_MS,
+        pauseProbeMs: e.SQS_CONSUMER_PAUSE_PROBE_MS,
+        pauseProbeMaxMs: Math.max(e.SQS_CONSUMER_PAUSE_PROBE_MS, e.SQS_CONSUMER_PAUSE_PROBE_MAX_MS),
       },
     },
     shutdownGraceMs: e.SHUTDOWN_GRACE_MS,

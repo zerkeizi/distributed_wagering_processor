@@ -28,6 +28,14 @@ export class MikroOrmUnitOfWork implements UnitOfWork {
     }
   }
 
+  async ping(): Promise<void> {
+    try {
+      await this.orm.em.fork().getConnection().execute("select 1");
+    } catch (error) {
+      throw translatePersistenceError(error);
+    }
+  }
+
   async read<T>(work: (scope: TransactionScope) => Promise<T>): Promise<T> {
     try {
       return await work(createTransactionScope(this.orm.em.fork()));

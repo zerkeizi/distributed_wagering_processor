@@ -63,6 +63,13 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  /** 1 enquanto o consumer está pausado esperando o banco voltar (circuit breaker aberto). */
+  readonly consumerPaused = new Gauge({
+    name: "wagering_consumer_paused",
+    help: "1 while the SQS consumer is paused because the database is unavailable",
+    registers: [this.registry],
+  });
+
   readonly outboxLagSeconds = new Gauge({
     name: "wagering_outbox_lag_seconds",
     help: "Age in seconds of the oldest unpublished outbox event (0 when empty)",

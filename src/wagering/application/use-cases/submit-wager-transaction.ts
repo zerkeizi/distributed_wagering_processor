@@ -1,6 +1,7 @@
 import { DomainError } from "../../../shared/domain/domain-error.ts";
 import { CurrencyMismatchError, Money, type MoneyProps } from "../../../shared/domain/money.ts";
 import { InboxMessage } from "../../../shared/messaging/inbox-message.ts";
+import { crashPoint } from "../../../shared/testing/crash-point.ts";
 import { ErrorCode } from "../../domain/error-code.ts";
 import { WalletPlayerMismatchError } from "../../domain/errors.ts";
 import { FailureCode } from "../../domain/failure-code.ts";
@@ -187,6 +188,8 @@ export class SubmitWagerTransaction {
 
         const outcome = await this.settler.settleAndStage(scope, candidate, wallet, now, "add");
         this.recordInbox(scope, command, now);
+        // Tudo registrado no Unit of Work, nada confirmado: morrer aqui não pode deixar rastro (CHALLENGE §3).
+        crashPoint("submit:before-commit");
         return toResult(candidate, wallet, outcome.status, false, "created");
       },
       { lockTimeoutMs: this.deps.walletLockTimeoutMs },

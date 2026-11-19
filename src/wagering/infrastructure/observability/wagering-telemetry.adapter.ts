@@ -44,6 +44,10 @@ export class WageringTelemetryAdapter implements WageringTelemetry {
     this.metrics.dlqMessages.inc({ reason });
   }
 
+  consumerPaused(paused: boolean): void {
+    this.metrics.consumerPaused.set(paused ? 1 : 0);
+  }
+
   dlqDepthObserved(depth: number): void {
     this.metrics.dlqDepth.set(depth);
   }

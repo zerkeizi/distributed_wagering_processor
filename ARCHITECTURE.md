@@ -87,6 +87,22 @@ Onde está cada cenário de concorrência exigido (CHALLENGE §13):
 | 7 | ROLLBACK/REFUND antes da referência | `test/integration/workers/pending-reference.test.ts` + `multi-instance.test.ts` |
 | 8 | reinício com consistência final | `multi-instance.test.ts` (SIGKILL + SIGTERM no meio da carga) |
 
+Premissas da CHALLENGE §3 que também têm teste próprio:
+
+| Premissa | Teste |
+|---|---|
+| processo morre **antes** do commit | `multi-instance.test.ts` (crash point `submit:before-commit`) |
+| Postgres temporariamente indisponível | `test/integration/sqs/database-outage.test.ts` (queda real: 503 rápido no HTTP, consumer pausado, nada na DLQ, tudo aplicado na volta) |
+| SQS temporariamente indisponível | verificado no compose: o HTTP segue aceitando, a outbox acumula e publica tudo na volta, e o consumer recua com backoff |
+
+**Indisponibilidade no HTTP.** O pool de conexões tem timeout de conexão (`DATABASE_CONNECT_TIMEOUT_MS`, padrão 2 s), então um banco inalcançável vira `503 TEMPORARILY_UNAVAILABLE` rápido, em vez de deixar a requisição pendurada. O tradutor de erros reconhece como indisponibilidade:
+- as classes SQLSTATE `08`, `53`, `57P01`–`57P03` e `58`;
+- o `55000` "not currently accepting connections";
+- os erros de rede;
+- as mensagens de conexão derrubada do driver `pg`, que vêm sem código.
+
+Tudo isso tem teste unitário. O nginx só tenta outra réplica quando a réplica não respondeu (`error`, `timeout`, `502`); um `503` da aplicação é resposta deliberada e vai direto ao cliente.
+
 ## Schema: garantias aplicadas pelo banco
 
 > CHALLENGE §5.9 ("unicidade, imutabilidade e não-negatividade… no schema do banco, não apenas em código de aplicação")
@@ -212,6 +228,7 @@ O consumer roda em toda instância com o papel `consumer`. Ele faz long polling 
 | `LOCK_TIMEOUT`, banco indisponível | retry: `ChangeMessageVisibility` com backoff por `ApproximateReceiveCount` (`SQS_RETRY_BASE_MS`…`SQS_RETRY_MAX_MS`) | — |
 | Erro inesperado (bug) | retry; se persistir, o redrive do SQS (`maxReceiveCount = 5`) leva para a DLQ | — |
 
+- **Banco indisponível → circuit breaker:** o consumer para de receber mensagens e só sonda o banco até ele voltar, em vez de gastar as entregas de cada mensagem e mandá-las para a DLQ (ADR 0014, atualização). Enquanto isso, `wagering_consumer_paused = 1`.
 - **Hash do inbox:** SHA-256 do JSON canônico de `{type, data}`. O `occurredAt` fica de fora por ser metadado de transporte.
 - **Ordem:** mensagens do mesmo `MessageGroupId` (a wallet) são processadas em sequência, e grupos diferentes em paralelo. Se uma mensagem do grupo precisa de retry, as seguintes do mesmo lote esperam junto, para não passarem na frente. Essa ordem é otimização; a correção vem do lock e do inbox.
 - **Correlação:** atributo de mensagem `correlationId` ou, na falta dele, o `messageId`. O valor fica persistido na transação.
@@ -275,6 +292,7 @@ Nos testes de concorrência, 3 processos `bun src/main.ts` separados (via `Bun.s
   | `wagering_retries_total{component}` | retries no consumer, no publisher e no worker |
   | `wagering_dlq_messages_total{reason}` e `wagering_dlq_depth` | mensagens em DLQ |
   | `wagering_lock_conflicts_total{type}` | conflitos de lock |
+  | `wagering_consumer_paused` | 1 enquanto o consumer espera o banco voltar |
   | `wagering_outbox_lag_seconds` e `wagering_outbox_pending_events` | outbox lag |
   | `wagering_processing_duration_seconds{channel,outcome}` | latência de processamento (histograma) |
   | `wagering_reconciliation_divergences_total` | divergências de reconciliação |

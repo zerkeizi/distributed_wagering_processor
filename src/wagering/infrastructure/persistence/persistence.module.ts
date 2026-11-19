@@ -20,7 +20,12 @@ export const UNIT_OF_WORK = Symbol("UNIT_OF_WORK");
       provide: MikroORM,
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) =>
-        MikroORM.init(createOrmOptions({ databaseUrl: config.database.url })),
+        MikroORM.init(
+          createOrmOptions({
+            databaseUrl: config.database.url,
+            connectTimeoutMs: config.database.connectTimeoutMs,
+          }),
+        ),
     },
     {
       provide: UNIT_OF_WORK,

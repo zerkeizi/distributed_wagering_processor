@@ -14,4 +14,4 @@ Os cenários estão em `test/concurrency/multi-instance.test.ts`, com processos 
 
 - **`consumer:after-commit-before-ack`:** o commit acontece e o processo morre antes do `DeleteMessage`. Outra instância recebe a reentrega depois do visibility timeout, o inbox absorve, e o débito acontece uma única vez.
 - **`outbox:after-publish-before-mark`:** o evento chega à fila, mas fica sem `published_at`. Depois do lease, outro publisher republica com o mesmo `eventId`; a deduplicação do SQS FIFO descarta a cópia, e nenhum evento se perde.
-
+- **`submit:before-commit`:** o processo morre com transação, lançamento, saldo, outbox e inbox já registrados no Unit of Work, mas antes do commit. Nada fica gravado, e a reentrega aplica a operação normalmente, uma vez só (CHALLENGE §3, "o processo pode morrer antes ou depois do commit").
