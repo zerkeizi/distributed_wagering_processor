@@ -29,12 +29,13 @@ export interface TestResponse {
 export async function startTestApp(
   env: Record<string, string> = {},
 ): Promise<TestApp & { close(): Promise<void> }> {
-  const db = await openTestDatabase();
+  const databaseUrl = env.DATABASE_URL ?? TEST_DATABASE_URL;
+  const db = await openTestDatabase(databaseUrl);
   const config = loadConfig({
     NODE_ENV: "test",
     LOG_LEVEL: process.env.TEST_LOG_LEVEL ?? "silent",
     ROLES: "api",
-    DATABASE_URL: TEST_DATABASE_URL,
+    DATABASE_URL: databaseUrl,
     AWS_ENDPOINT_URL: process.env.AWS_ENDPOINT_URL ?? "http://localhost:4566",
     AWS_ACCESS_KEY_ID: "test",
     AWS_SECRET_ACCESS_KEY: "test",

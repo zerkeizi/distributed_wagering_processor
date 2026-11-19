@@ -8,6 +8,7 @@ import { ObservabilityModule } from "./shared/observability/observability.module
 import { PersistenceModule } from "./wagering/infrastructure/persistence/persistence.module.ts";
 import { WageringHttpModule } from "./wagering/interface/http/wagering-http.module.ts";
 import { SqsConsumerModule } from "./wagering/interface/sqs/sqs-consumer.module.ts";
+import { WorkersModule } from "./wagering/interface/workers/workers.module.ts";
 
 /**
  * O servidor HTTP sobe em toda instância (health e métricas são sempre necessários); os papéis
@@ -26,6 +27,7 @@ export class AppModule {
         HealthModule,
         ...(config.roles.includes("api") ? [WageringHttpModule] : []),
         ...(config.roles.includes("consumer") ? [SqsConsumerModule] : []),
+        WorkersModule.forRoles(config.roles),
       ],
       controllers: [AppController],
     };

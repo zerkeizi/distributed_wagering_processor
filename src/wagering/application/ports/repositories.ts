@@ -39,6 +39,11 @@ export interface WagerTransactionRepository {
     providerId: string,
     externalTransactionId: string,
   ): Promise<ResolvedReference | undefined>;
+  /** Pendentes cuja próxima tentativa já venceu, mais antigas primeiro (leitura, sem lock). */
+  findDueForResolution(
+    now: Date,
+    limit: number,
+  ): Promise<readonly { readonly id: string; readonly walletId: string }[]>;
   /**
    * Reagenda para `at` as transações em PENDING_REFERENCE que esperam por
    * (providerId, externalTransactionId): a reference chegou, não há por que esperar o backoff.

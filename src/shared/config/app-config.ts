@@ -37,6 +37,14 @@ const envSchema = z.object({
   SQS_RETRY_BASE_MS: z.coerce.number().int().positive().default(2_000),
   SQS_RETRY_MAX_MS: z.coerce.number().int().positive().default(60_000),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(10_000),
+  OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(500),
+  OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+  OUTBOX_LEASE_MS: z.coerce.number().int().positive().default(30_000),
+  OUTBOX_RETRY_BASE_MS: z.coerce.number().int().positive().default(1_000),
+  OUTBOX_RETRY_MAX_MS: z.coerce.number().int().positive().default(60_000),
+  PENDING_REFERENCE_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(1_000),
+  PENDING_REFERENCE_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+  FAULT_CRASH_AT: z.string().min(1).optional(),
   WALLET_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
   REFERENCE_RETRY_MAX: z.coerce.number().int().min(0).default(10),
   REFERENCE_RETRY_BASE_MS: z.coerce.number().int().positive().default(2000),
@@ -72,6 +80,20 @@ export interface AppConfig {
   };
   /** No SIGTERM: quanto esperar mensagens em andamento antes de devolvê-las à fila. */
   readonly shutdownGraceMs: number;
+  readonly outbox: {
+    readonly pollIntervalMs: number;
+    readonly batchSize: number;
+    /** Quanto tempo um publisher "reserva" os eventos que pegou; se morrer, outro assume depois disso. */
+    readonly leaseMs: number;
+    readonly retryBaseMs: number;
+    readonly retryMaxMs: number;
+  };
+  readonly pendingReferences: {
+    readonly pollIntervalMs: number;
+    readonly batchSize: number;
+  };
+  /** Crash point de teste (ADR 0016). Ignorado em produção. */
+  readonly faultCrashAt: string | undefined;
   readonly healthCheckTimeoutMs: number;
   readonly wagering: {
     /** Espera máxima pelo lock da wallet antes de responder 503 LOCK_TIMEOUT (ADR 0003). */
@@ -126,6 +148,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       },
     },
     shutdownGraceMs: e.SHUTDOWN_GRACE_MS,
+    outbox: {
+      pollIntervalMs: e.OUTBOX_POLL_INTERVAL_MS,
+      batchSize: e.OUTBOX_BATCH_SIZE,
+      leaseMs: e.OUTBOX_LEASE_MS,
+      retryBaseMs: e.OUTBOX_RETRY_BASE_MS,
+      retryMaxMs: Math.max(e.OUTBOX_RETRY_BASE_MS, e.OUTBOX_RETRY_MAX_MS),
+    },
+    pendingReferences: {
+      pollIntervalMs: e.PENDING_REFERENCE_POLL_INTERVAL_MS,
+      batchSize: e.PENDING_REFERENCE_BATCH_SIZE,
+    },
+    faultCrashAt: e.NODE_ENV === "production" ? undefined : e.FAULT_CRASH_AT,
     healthCheckTimeoutMs: e.HEALTH_CHECK_TIMEOUT_MS,
     wagering: {
       walletLockTimeoutMs: e.WALLET_LOCK_TIMEOUT_MS,

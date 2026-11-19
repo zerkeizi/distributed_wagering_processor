@@ -22,7 +22,10 @@ export interface TestQueues {
 }
 
 /** Filas exclusivas de uma suíte (prefixo aleatório): suítes não consomem mensagens umas das outras. */
-export async function createTestQueues(maxReceiveCount = 3): Promise<TestQueues> {
+export async function createTestQueues(
+  maxReceiveCount = 3,
+  visibilityTimeoutSeconds = 30,
+): Promise<TestQueues> {
   const prefix = `t${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
   const names = {
     wager: `${prefix}-wager-transactions.fifo`,
@@ -45,7 +48,7 @@ export async function createTestQueues(maxReceiveCount = 3): Promise<TestQueues>
     )
   ).Attributes?.QueueArn;
   const wagerUrl = await create(names.wager, {
-    VisibilityTimeout: "30",
+    VisibilityTimeout: String(visibilityTimeoutSeconds),
     RedrivePolicy: JSON.stringify({
       deadLetterTargetArn: dlqArn,
       maxReceiveCount: String(maxReceiveCount),

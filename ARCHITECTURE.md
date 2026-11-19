@@ -57,6 +57,20 @@ src/
 - Para o isolamento, cada teste cria as próprias wallets e providers com IDs aleatórios, sem truncar tabelas, e cada suíte usa um prefixo de fila próprio.
 - Todos os testes terminam verificando `wallet.balance == saldo reconstruído pelo ledger` por meio de um helper comum.
 - Os cenários de crash usam crash points (ADR 0016).
+- Suítes que não podem enxergar o que outras deixaram para trás (outbox, multi-instância) usam um **banco próprio**, criado e migrado na hora e apagado no fim.
+
+Onde está cada cenário de concorrência exigido (CHALLENGE §13):
+
+| # | Cenário | Teste |
+|---|---|---|
+| 1 | mesma aposta 50× em paralelo | `test/concurrency/same-wallet.test.ts` |
+| 2 | disputa de saldo na mesma wallet (§8) | `test/concurrency/same-wallet.test.ts` |
+| 3 | wallets distintas em paralelo | `test/concurrency/distinct-wallets.test.ts` |
+| 4 | ≥ 3 processos simultâneos | `test/concurrency/multi-instance.test.ts` (processos `bun src/main.ts` reais) |
+| 5 | worker morto depois do commit e antes do ack | `multi-instance.test.ts` (crash point) |
+| 6 | dois publishers sobre a mesma outbox | `test/integration/workers/relay-outbox.test.ts` + `multi-instance.test.ts` (crash do publisher) |
+| 7 | ROLLBACK/REFUND antes da referência | `test/integration/workers/pending-reference.test.ts` + `multi-instance.test.ts` |
+| 8 | reinício com consistência final | `multi-instance.test.ts` (SIGKILL + SIGTERM no meio da carga) |
 
 ## Schema: garantias aplicadas pelo banco
 
@@ -180,9 +194,29 @@ O consumer roda em toda instância com o papel `consumer`. Ele faz long polling 
 > CHALLENGE §7.1
 
 - O backoff exponencial começa em 2s, dobra a cada tentativa, tem teto de 5 min e para em **10 novas tentativas** depois da primeira (cerca de 18,5 min no total; `ReferenceResolutionPolicy.default()`). Esse prazo cobre atrasos normais de entrega e redelivery do provider sem deixar transações pendentes por tempo indefinido. Todos os parâmetros são configuráveis por env (os testes usam milissegundos).
-- O worker pega trabalho com `FOR UPDATE SKIP LOCKED`, então pode rodar em várias instâncias.
-- Há um gatilho imediato: quando uma wager transaction vira `PROCESSED`, a mesma transação SQL zera o `next_attempt_at` das `PENDING_REFERENCE` que apontam para ela.
-- Esgotadas as tentativas: `REJECTED` com `REFERENCE_NOT_FOUND` e evento `WagerTransactionRejected`.
+- **Worker** (`ResolvePendingReferences`, papel `pending-reference-worker`):
+  - lê as pendentes vencidas sem lock;
+  - para cada uma, numa transação: trava a **wallet**, relê a transação e aplica as mesmas regras da submissão (`TransactionSettler`, compartilhado).
+
+  A ordem de lock é a mesma da submissão (wallet → transação), então worker e submissão nunca entram em deadlock. Várias instâncias podem rodar o worker: se duas olham a mesma pendente, a segunda espera o lock, relê, vê que ela já foi tratada (ou ainda não venceu) e segue.
+- Há um gatilho imediato: quando uma wager transaction termina (`PROCESSED`/`REJECTED`), a mesma transação SQL antecipa para agora o `next_resolution_at` das `PENDING_REFERENCE` que esperam por ela. Em produção, o worker resolve em menos de 1 s (no `smoke:events`, ~200–400 ms).
+- Esgotadas as tentativas: `REJECTED` com `REFERENCE_NOT_FOUND` e evento `WagerTransactionRejected`. `WagerTransactionPendingReference` é emitido só na entrada em espera, não a cada nova tentativa.
+- **Erro permanente que não é de negócio** (por exemplo, o banco recusa o lançamento porque o encadeamento do ledger foi corrompido): a transação vira `FAILED` com `INTERNAL_INVARIANT_VIOLATION`, numa transação separada, com log `error` (ADR 0011). Erros transitórios (lock, banco fora do ar) só deixam a pendente para a próxima rodada.
+
+## Outbox publisher
+
+> CHALLENGE §11; ADR 0013
+
+Papel `outbox-publisher`; várias instâncias podem rodar juntas.
+
+- **A cada rodada** (`OUTBOX_POLL_INTERVAL_MS`, padrão 500 ms; sem espera quando o lote veio cheio):
+  1. **claim** de até `OUTBOX_BATCH_SIZE` eventos pendentes e vencidos, com `SKIP LOCKED` e lease de `OUTBOX_LEASE_MS` (padrão 30 s);
+  2. **publish** em `wagering-events.fifo`, com `MessageGroupId = aggregateId` (wallet) e `MessageDeduplicationId = eventId`;
+  3. **marcar** `published_at`.
+- **Falha no publish:** `scheduleRetry` (backoff `OUTBOX_RETRY_BASE_MS`…`OUTBOX_RETRY_MAX_MS`, **sem limite de tentativas**) e a reserva é liberada.
+- **Publisher que morre** entre publicar e marcar: depois do lease, outro republica. Garantia at-least-once, com deduplicação pelo `eventId`.
+- **Métricas:** `wagering_outbox_pending_events`, `wagering_outbox_lag_seconds` (idade do evento pendente mais antigo) e `wagering_retries_total{component="outbox_publisher"}`.
+- **Shutdown:** no `SIGTERM`, os dois workers terminam a rodada em andamento antes de o pool de conexões fechar.
 
 ## Topologia
 

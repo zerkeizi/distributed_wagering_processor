@@ -135,6 +135,18 @@ export class MikroOrmWagerTransactionRepository implements WagerTransactionRepos
     return { transaction, alreadyReversed: reversals > 0 };
   }
 
+  async findDueForResolution(
+    now: Date,
+    limit: number,
+  ): Promise<readonly { id: string; walletId: string }[]> {
+    const rows = await this.em.find(
+      WagerTransactionRecord,
+      { status: WagerTransactionStatus.PendingReference, nextResolutionAt: { $lte: now } },
+      { fields: ["id", "walletId"], orderBy: { nextResolutionAt: "asc" }, limit },
+    );
+    return rows.map((r) => ({ id: r.id, walletId: r.walletId }));
+  }
+
   rescheduleWaitingOn(
     providerId: string,
     externalTransactionId: string,

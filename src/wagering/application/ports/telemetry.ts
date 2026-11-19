@@ -26,6 +26,10 @@ export interface WageringTelemetry {
   dlqDepthObserved(depth: number): void;
   submissionObserved(channel: EntryChannel, outcome: SubmissionOutcome, seconds: number): void;
   reconciliationDivergence(divergence: ReconciliationDivergence): void;
+  outboxObserved(stats: {
+    readonly pending: number;
+    readonly oldestPendingAgeSeconds: number;
+  }): void;
 }
 
 export const WAGERING_TELEMETRY = Symbol("WAGERING_TELEMETRY");

@@ -52,6 +52,11 @@ export class WageringTelemetryAdapter implements WageringTelemetry {
     this.metrics.processingDuration.observe({ channel, outcome }, seconds);
   }
 
+  outboxObserved(stats: { pending: number; oldestPendingAgeSeconds: number }): void {
+    this.metrics.outboxPending.set(stats.pending);
+    this.metrics.outboxLagSeconds.set(stats.oldestPendingAgeSeconds);
+  }
+
   reconciliationDivergence(divergence: ReconciliationDivergence): void {
     this.metrics.reconciliationDivergences.inc();
     // Diferença e tipos de anomalia ajudam o diagnóstico; nenhum saldo completo vai para o log.

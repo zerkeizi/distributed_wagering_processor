@@ -19,6 +19,7 @@ import { APP_CONFIG } from "../../../shared/config/config.module.ts";
 import { ExponentialBackoff } from "../../../shared/domain/exponential-backoff.ts";
 import { SQS_CLIENT } from "../../../shared/infrastructure/infrastructure.module.ts";
 import { SqsQueueResolver } from "../../../shared/infrastructure/sqs/sqs-queue-resolver.ts";
+import { crashPoint } from "../../../shared/testing/crash-point.ts";
 import { WAGERING_TELEMETRY, type WageringTelemetry } from "../../application/ports/telemetry.ts";
 import { type HandlingDecision, WagerMessageHandler } from "./wager-message-handler.ts";
 
@@ -182,6 +183,8 @@ export class WagerTransactionConsumer implements OnApplicationBootstrap, BeforeA
     try {
       switch (decision.action) {
         case "ack":
+          // Commit já aconteceu; morrer aqui faz o SQS reentregar e o inbox absorver (CHALLENGE §13.5).
+          crashPoint("consumer:after-commit-before-ack");
           await this.delete(queueUrl, message);
           return undefined;
         case "dead-letter":

@@ -37,6 +37,35 @@ export async function openTestDatabase(url = TEST_DATABASE_URL): Promise<TestDat
   };
 }
 
+/**
+ * Banco novo e vazio (criado e migrado na hora), para suítes que não podem enxergar o que outras
+ * deixaram no banco compartilhado — por exemplo, a outbox, onde eventos pendentes de outras suítes
+ * entrariam na disputa do publisher.
+ */
+export async function openFreshDatabase(
+  label: string,
+): Promise<TestDatabase & { url: string; drop(): Promise<void> }> {
+  const name = `wagering_${label}_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
+  const url = new URL(TEST_DATABASE_URL);
+  url.pathname = `/${name}`;
+  const db = await openTestDatabase(url.toString());
+  return {
+    ...db,
+    url: url.toString(),
+    async drop() {
+      await db.orm.close();
+      const admin = await MikroORM.init(
+        createOrmOptions({ databaseUrl: TEST_DATABASE_URL, poolMax: 1 }),
+      );
+      await admin.em
+        .fork()
+        .getConnection()
+        .execute(`drop database if exists "${name}" with (force)`);
+      await admin.close();
+    },
+  };
+}
+
 /** Abre o banco antes dos testes do arquivo e fecha no fim. */
 export function useTestDatabase(): () => TestDatabase {
   let db: TestDatabase | undefined;

@@ -1,30 +1,23 @@
 import { DomainError } from "../../../shared/domain/domain-error.ts";
 import { CurrencyMismatchError, Money, type MoneyProps } from "../../../shared/domain/money.ts";
 import { InboxMessage } from "../../../shared/messaging/inbox-message.ts";
-import { OutboxMessage } from "../../../shared/messaging/outbox-message.ts";
 import { WalletPlayerMismatchError } from "../../domain/errors.ts";
-import { WagerTransactionPendingReference } from "../../domain/events/wager-transaction-pending-reference.ts";
-import { WagerTransactionProcessed } from "../../domain/events/wager-transaction-processed.ts";
-import { WagerTransactionRejected } from "../../domain/events/wager-transaction-rejected.ts";
-import { WalletBalanceChanged } from "../../domain/events/wallet-balance-changed.ts";
 import { FailureCode } from "../../domain/failure-code.ts";
 import { evaluateReference } from "../../domain/reference-policy.ts";
 import type { ReferenceResolutionPolicy } from "../../domain/reference-resolution-policy.ts";
-import { type SettlementOutcome, settle } from "../../domain/settlement.ts";
 import { WagerTransaction } from "../../domain/wager-transaction.ts";
 import {
   WagerTransactionKind,
   WagerTransactionStatus,
 } from "../../domain/wager-transaction-kind.ts";
 import type { Wallet } from "../../domain/wallet.ts";
-import type { WalletLedgerEntry } from "../../domain/wallet-ledger-entry.ts";
 import { WalletNotFoundError } from "../errors.ts";
-import { eventContext } from "../event-context.ts";
 import type { Clock } from "../ports/clock.ts";
 import type { IdGenerator } from "../ports/id-generator.ts";
 import { LockTimeoutError, UniqueViolationError } from "../ports/persistence-errors.ts";
 import type { EntryChannel, WageringTelemetry } from "../ports/telemetry.ts";
 import type { TransactionScope, UnitOfWork } from "../ports/unit-of-work.ts";
+import { TransactionSettler } from "../transaction-settler.ts";
 
 export interface SubmitWagerTransactionCommand {
   readonly idempotencyKey: string;
@@ -99,7 +92,11 @@ export interface SubmitWagerTransactionDeps {
  * ou nada é (CHALLENGE §11).
  */
 export class SubmitWagerTransaction {
-  constructor(private readonly deps: SubmitWagerTransactionDeps) {}
+  private readonly settler: TransactionSettler;
+
+  constructor(private readonly deps: SubmitWagerTransactionDeps) {
+    this.settler = new TransactionSettler(deps.ids, deps.resolutionPolicy);
+  }
 
   async execute(command: SubmitWagerTransactionCommand): Promise<SubmissionResult> {
     const startedAt = performance.now();
@@ -187,7 +184,7 @@ export class SubmitWagerTransaction {
           throw new IdempotencyConflictError(FailureCode.ExternalIdConflict, sameExternalId.id);
         }
 
-        const outcome = await this.settleAndStage(scope, candidate, wallet, now, "add");
+        const outcome = await this.settler.settleAndStage(scope, candidate, wallet, now, "add");
         this.recordInbox(scope, command, now);
         return toResult(candidate, wallet, outcome.status, false, "created");
       },
@@ -209,81 +206,19 @@ export class SubmitWagerTransaction {
     if (existing.status !== WagerTransactionStatus.PendingReference) {
       return toResult(existing, wallet, existing.status, true, "replayed");
     }
-    const reference = await this.findReference(scope, existing);
+    const reference = await this.settler.findReference(scope, existing);
     if (!reference || evaluateReference(existing, reference).outcome === "wait") {
       return toResult(existing, wallet, existing.status, true, "replayed");
     }
-    const outcome = await this.settleAndStage(scope, existing, wallet, now, "save", reference);
-    return toResult(existing, wallet, outcome.status, true, "resolved");
-  }
-
-  /**
-   * Aplica as regras e registra no scope tudo o que o resultado exige: transação, lançamento, saldo,
-   * eventos e o reagendamento de quem esperava por esta transação.
-   */
-  private async settleAndStage(
-    scope: TransactionScope,
-    tx: WagerTransaction,
-    wallet: Wallet,
-    now: Date,
-    mode: "add" | "save",
-    preloadedReference?: Awaited<ReturnType<SubmitWagerTransaction["findReference"]>>,
-  ): Promise<SettlementOutcome> {
-    const reference = preloadedReference ?? (await this.findReference(scope, tx));
-    const outcome = settle({
-      transaction: tx,
+    const outcome = await this.settler.settleAndStage(
+      scope,
+      existing,
       wallet,
+      now,
+      "save",
       reference,
-      resolutionPolicy: this.deps.resolutionPolicy,
-      ledgerEntryId: this.deps.ids.next(),
-      at: now,
-    });
-
-    if (mode === "add") scope.transactions.add(tx);
-    else scope.transactions.save(tx);
-
-    const ledgerEntry =
-      outcome.status === WagerTransactionStatus.Processed ? outcome.ledgerEntry : undefined;
-    if (ledgerEntry) {
-      scope.ledger.append(ledgerEntry);
-      scope.wallets.save(wallet);
-    }
-    this.stageEvents(scope, tx, wallet, ledgerEntry, now);
-
-    if (tx.isTerminal()) {
-      await scope.transactions.rescheduleWaitingOn(tx.providerId, tx.externalTransactionId, now);
-    }
-    return outcome;
-  }
-
-  private stageEvents(
-    scope: TransactionScope,
-    tx: WagerTransaction,
-    wallet: Wallet,
-    ledgerEntry: WalletLedgerEntry | undefined,
-    now: Date,
-  ): void {
-    const ctx = () => eventContext(this.deps.ids, tx.correlationId, tx.id, now);
-    const enqueue = (event: Parameters<typeof OutboxMessage.enqueue>[0]) =>
-      scope.outbox.add(OutboxMessage.enqueue(event));
-    switch (tx.status) {
-      case WagerTransactionStatus.Processed:
-        enqueue(WagerTransactionProcessed.from(tx, ctx()));
-        if (ledgerEntry) enqueue(WalletBalanceChanged.from(wallet, ledgerEntry, ctx()));
-        break;
-      case WagerTransactionStatus.Rejected:
-        enqueue(WagerTransactionRejected.from(tx, ctx()));
-        break;
-      case WagerTransactionStatus.PendingReference:
-        enqueue(WagerTransactionPendingReference.from(tx, ctx()));
-        break;
-    }
-  }
-
-  private findReference(scope: TransactionScope, tx: WagerTransaction) {
-    return tx.referenceExternalTransactionId === undefined
-      ? Promise.resolve(undefined)
-      : scope.transactions.findReference(tx.providerId, tx.referenceExternalTransactionId);
+    );
+    return toResult(existing, wallet, outcome.status, true, "resolved");
   }
 
   private recordInbox(scope: TransactionScope, command: SubmitWagerTransactionCommand, now: Date) {

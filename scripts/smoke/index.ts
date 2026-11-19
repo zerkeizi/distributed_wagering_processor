@@ -5,6 +5,7 @@
  */
 import { smokeDb } from "./db.ts";
 import { smokeDomain } from "./domain.ts";
+import { smokeEvents } from "./events.ts";
 import { smokeInfra } from "./infra.ts";
 import { smokeRace } from "./race.ts";
 import { smokeSqs } from "./sqs.ts";
@@ -15,6 +16,7 @@ const parts: Record<string, () => Promise<void>> = {
   db: smokeDb,
   race: smokeRace,
   sqs: smokeSqs,
+  events: smokeEvents,
 };
 
 const name = process.argv[2] ?? "infra";
