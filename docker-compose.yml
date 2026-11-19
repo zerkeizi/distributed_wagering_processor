@@ -50,6 +50,9 @@ services:
   app:
     image: wagering-app:local
     build: .
+    # SIGTERM → a app tem até SHUTDOWN_GRACE_MS (10 s) para drenar mensagens; o Docker só manda
+    # SIGKILL depois deste prazo, maior que o da app.
+    stop_grace_period: 20s
     deploy:
       replicas: 3
     environment:

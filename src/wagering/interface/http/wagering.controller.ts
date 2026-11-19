@@ -12,7 +12,6 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import type { Response } from "express";
-import { z } from "zod";
 import { AuthGuard } from "../../../shared/auth/auth.guard.ts";
 import {
   PROVIDER_IDENTITY,
@@ -27,31 +26,16 @@ import {
   type SubmissionResult,
   SubmitWagerTransaction,
 } from "../../application/use-cases/submit-wager-transaction.ts";
+import { WagerTransactionStatus } from "../../domain/wager-transaction-kind.ts";
 import {
-  WagerTransactionKind,
-  WagerTransactionStatus,
-} from "../../domain/wager-transaction-kind.ts";
-import { moneySchema, parseInput, uuidSchema } from "./validation.ts";
+  idempotencyKeySchema,
+  identifier,
+  uuidSchema,
+  wagerTransactionFields,
+} from "../contracts.ts";
+import { parseInput } from "./validation.ts";
 
-const identifier = z.string().min(1).max(128);
-
-const submitBody = z.object({
-  providerId: identifier,
-  externalTransactionId: identifier,
-  playerId: uuidSchema,
-  walletId: uuidSchema,
-  roundId: identifier,
-  gameId: identifier,
-  // OPENING passa aqui de propósito: o domínio recusa com UNSUPPORTED_KIND, mais claro que "enum inválido".
-  kind: z.enum(Object.values(WagerTransactionKind) as [string, ...string[]]),
-  money: moneySchema,
-  referenceExternalTransactionId: identifier.optional(),
-});
-
-const idempotencyKeyHeader = z
-  .string({ error: "Idempotency-Key header is required" })
-  .min(1, "Idempotency-Key header is required")
-  .max(255, "Idempotency-Key must be at most 255 characters");
+const submitBody = wagerTransactionFields;
 
 export type SubmissionResponse = Omit<SubmissionResult, "outcome">;
 
@@ -87,7 +71,7 @@ export class WageringController {
     @Body() body: unknown,
     @Res({ passthrough: true }) res: Response,
   ): Promise<SubmissionResponse> {
-    const key = parseInput(idempotencyKeyHeader, idempotencyKey, "Idempotency-Key");
+    const key = parseInput(idempotencyKeySchema, idempotencyKey, "Idempotency-Key");
     const input = parseInput(submitBody, body, "body");
     enrichLogContext({ providerId: input.providerId, walletId: input.walletId });
     this.assertCallerIs(input.providerId);

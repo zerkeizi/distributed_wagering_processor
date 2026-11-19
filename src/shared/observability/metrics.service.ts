@@ -56,6 +56,13 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  /** Profundidade da DLQ (inclui o que o redrive do SQS moveu sozinho), amostrada pelo consumer. */
+  readonly dlqDepth = new Gauge({
+    name: "wagering_dlq_depth",
+    help: "Approximate number of messages waiting in the dead-letter queue",
+    registers: [this.registry],
+  });
+
   readonly outboxLagSeconds = new Gauge({
     name: "wagering_outbox_lag_seconds",
     help: "Age in seconds of the oldest unpublished outbox event (0 when empty)",

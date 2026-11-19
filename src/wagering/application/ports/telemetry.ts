@@ -21,6 +21,9 @@ export interface WageringTelemetry {
   duplicateDetected(source: "idempotent_replay" | "inbox"): void;
   idempotencyConflict(code: string): void;
   lockConflict(type: "lock_timeout" | "deadlock"): void;
+  retryScheduled(component: "sqs_consumer" | "outbox_publisher" | "pending_reference_worker"): void;
+  deadLettered(reason: string): void;
+  dlqDepthObserved(depth: number): void;
   submissionObserved(channel: EntryChannel, outcome: SubmissionOutcome, seconds: number): void;
   reconciliationDivergence(divergence: ReconciliationDivergence): void;
 }

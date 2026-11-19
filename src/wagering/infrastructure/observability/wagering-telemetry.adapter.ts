@@ -34,6 +34,20 @@ export class WageringTelemetryAdapter implements WageringTelemetry {
     this.metrics.lockConflicts.inc({ type });
   }
 
+  retryScheduled(
+    component: "sqs_consumer" | "outbox_publisher" | "pending_reference_worker",
+  ): void {
+    this.metrics.retries.inc({ component });
+  }
+
+  deadLettered(reason: string): void {
+    this.metrics.dlqMessages.inc({ reason });
+  }
+
+  dlqDepthObserved(depth: number): void {
+    this.metrics.dlqDepth.set(depth);
+  }
+
   submissionObserved(channel: EntryChannel, outcome: SubmissionOutcome, seconds: number): void {
     this.metrics.processingDuration.observe({ channel, outcome }, seconds);
   }

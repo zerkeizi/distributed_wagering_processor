@@ -153,6 +153,28 @@ Como o lock vem antes da busca de idempotência, reenvios para a **mesma wallet*
 
 O corpo é sempre `{ transactionId, status, balance, failureCode, idempotentReplay }`, e `balance` é o saldo observado quando a transação terminou.
 
+## Consumer SQS
+
+> CHALLENGE §10; ADR 0014
+
+O consumer roda em toda instância com o papel `consumer`. Ele faz long polling em `wager-transactions.fifo` e chama o **mesmo** `SubmitWagerTransaction` do HTTP, passando o registro de inbox para ser gravado na mesma transação SQL. A decisão sobre cada mensagem (`WagerMessageHandler`) fica separada do I/O com o SQS (`WagerTransactionConsumer`). O ack (`DeleteMessage`) só acontece depois que o handler devolve, ou seja, depois do commit.
+
+| Situação | Destino | Inbox |
+|---|---|---|
+| Processada (`PROCESSED`, `REJECTED`, `PENDING_REFERENCE`, replay) | ack | gravado na transação do efeito |
+| `messageId` já no inbox com o mesmo conteúdo | ack (duplicata) | — |
+| Erro de negócio sem persistência: `WALLET_NOT_FOUND`, `*_MISMATCH`, conflitos de idempotência | ack | gravado à parte (ADR 0007) |
+| JSON ou schema inválido, `INVALID_PAYLOAD`, `UNSUPPORTED_KIND` (ex.: `OPENING`), `REFERENCE_REQUIRED` | **DLQ na hora**, com `deadLetterReason` | — |
+| `messageId` já no inbox com **outro** conteúdo | **DLQ na hora** (`message_id_reused`) | — |
+| `LOCK_TIMEOUT`, banco indisponível | retry: `ChangeMessageVisibility` com backoff por `ApproximateReceiveCount` (`SQS_RETRY_BASE_MS`…`SQS_RETRY_MAX_MS`) | — |
+| Erro inesperado (bug) | retry; se persistir, o redrive do SQS (`maxReceiveCount = 5`) leva para a DLQ | — |
+
+- **Hash do inbox:** SHA-256 do JSON canônico de `{type, data}`. O `occurredAt` fica de fora por ser metadado de transporte.
+- **Ordem:** mensagens do mesmo `MessageGroupId` (a wallet) são processadas em sequência, e grupos diferentes em paralelo. Se uma mensagem do grupo precisa de retry, as seguintes do mesmo lote esperam junto, para não passarem na frente. Essa ordem é otimização; a correção vem do lock e do inbox.
+- **Correlação:** atributo de mensagem `correlationId` ou, na falta dele, o `messageId`. O valor fica persistido na transação.
+- **`SIGTERM`** (`enableShutdownHooks`): o consumer para de receber (aborta o long polling) e espera as mensagens em andamento até `SHUTDOWN_GRACE_MS` (padrão 10 s). O que não terminou volta para a fila com visibilidade 0, para outra instância pegar na hora. O compose dá `stop_grace_period: 20s`, maior que o prazo da aplicação. Se uma mensagem devolvida chegar a confirmar depois, a reentrega cai no inbox e não repete o efeito.
+- **Métricas:** `wagering_dlq_messages_total{reason}` conta o que o consumer mandou explicitamente para a DLQ. `wagering_dlq_depth` (amostrado a cada 15 s) mostra a profundidade real, incluindo o que o redrive do SQS moveu sozinho. Também `wagering_retries_total{component="sqs_consumer"}` e `wagering_duplicates_detected_total{source="inbox"}`.
+
 ## Referências fora de ordem
 
 > CHALLENGE §7.1
@@ -175,6 +197,7 @@ Uma única imagem, com papéis ligados por env: `api`, `consumer`, `outbox-publi
 - Logs JSON com `nestjs-pino`, `correlationId` propagado por AsyncLocalStorage e redaction de valores e payloads financeiros.
 - `GET /metrics` com `prom-client`: transações por status, duplicatas detectadas, retries, mensagens em DLQ, lock timeouts, outbox lag (idade do evento pendente mais antigo), latência de processamento (histograma) e divergências de reconciliação.
 - `GET /health/live` e `GET /health/ready` (Postgres e SQS), sem autenticação.
+- **Métricas são por instância:** cada réplica expõe o próprio `/metrics`. Em produção, o Prometheus coleta cada instância diretamente (service discovery), e não pelo load balancer; no compose, um `GET /metrics` pelo nginx mostra só a réplica que atendeu.
 - **Qual réplica atendeu** fica só nos logs internos: toda linha traz `instanceId`, junto com `correlationId`, `transactionId` e `walletId`. Nenhum identificador de instância é exposto na resposta HTTP. Para investigar um problema, o provider informa o `transactionId` ou o `X-Correlation-Id` (que ele pode enviar e recebe de volta), e o resto se encontra nos logs.
 
 ## Reconciliação

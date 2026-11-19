@@ -32,6 +32,11 @@ const envSchema = z.object({
   SQS_WAGER_DLQ_NAME: z.string().endsWith(".fifo").default("wager-transactions-dlq.fifo"),
   SQS_EVENTS_QUEUE_NAME: z.string().endsWith(".fifo").default("wagering-events.fifo"),
   HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+  SQS_CONSUMER_WAIT_SECONDS: z.coerce.number().int().min(0).max(20).default(20),
+  SQS_CONSUMER_BATCH_SIZE: z.coerce.number().int().min(1).max(10).default(10),
+  SQS_RETRY_BASE_MS: z.coerce.number().int().positive().default(2_000),
+  SQS_RETRY_MAX_MS: z.coerce.number().int().positive().default(60_000),
+  SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(10_000),
   WALLET_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
   REFERENCE_RETRY_MAX: z.coerce.number().int().min(0).default(10),
   REFERENCE_RETRY_BASE_MS: z.coerce.number().int().positive().default(2000),
@@ -56,7 +61,17 @@ export interface AppConfig {
     readonly wagerQueueName: string;
     readonly wagerDlqName: string;
     readonly eventsQueueName: string;
+    readonly consumer: {
+      /** Long polling: quanto o ReceiveMessage espera por mensagens (0–20 s). */
+      readonly waitSeconds: number;
+      readonly batchSize: number;
+      /** Backoff de falha transitória, aplicado via ChangeMessageVisibility (ADR 0014). */
+      readonly retryBaseMs: number;
+      readonly retryMaxMs: number;
+    };
   };
+  /** No SIGTERM: quanto esperar mensagens em andamento antes de devolvê-las à fila. */
+  readonly shutdownGraceMs: number;
   readonly healthCheckTimeoutMs: number;
   readonly wagering: {
     /** Espera máxima pelo lock da wallet antes de responder 503 LOCK_TIMEOUT (ADR 0003). */
@@ -103,7 +118,14 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       wagerQueueName: e.SQS_WAGER_QUEUE_NAME,
       wagerDlqName: e.SQS_WAGER_DLQ_NAME,
       eventsQueueName: e.SQS_EVENTS_QUEUE_NAME,
+      consumer: {
+        waitSeconds: e.SQS_CONSUMER_WAIT_SECONDS,
+        batchSize: e.SQS_CONSUMER_BATCH_SIZE,
+        retryBaseMs: e.SQS_RETRY_BASE_MS,
+        retryMaxMs: e.SQS_RETRY_MAX_MS,
+      },
     },
+    shutdownGraceMs: e.SHUTDOWN_GRACE_MS,
     healthCheckTimeoutMs: e.HEALTH_CHECK_TIMEOUT_MS,
     wagering: {
       walletLockTimeoutMs: e.WALLET_LOCK_TIMEOUT_MS,
