@@ -267,6 +267,93 @@ describe("wallet_ledger_entry", () => {
   });
 });
 
+describe("saldo ↔ ledger nas duas direções (CHALLENGE §6.2, §5.9)", () => {
+  test("lançamento sem a alteração de saldo correspondente é recusado no commit (o 'vice-versa')", async () => {
+    const { wallet } = await walletWithProcessedBet(db()); // 90.00, v2
+    const bet = betRow(wallet, { balance_after: "80.00" });
+    const err = await errorOf(
+      db().inTransaction(async (exec) => {
+        const tx = insertSql("wager_transaction", bet);
+        await exec(tx.sql, tx.params);
+        const entry = insertSql("wallet_ledger_entry", {
+          id: uuid(),
+          wallet_id: wallet.walletId,
+          transaction_id: bet.id as string,
+          currency: "BRL",
+          direction: "DEBIT",
+          amount: "10.00",
+          balance_before: "90.00",
+          balance_after: "80.00",
+          wallet_version: 3,
+          created_at: new Date().toISOString(),
+        });
+        await exec(entry.sql, entry.params);
+        // Esquece de atualizar a wallet: o extrato diria 80.00 e o saldo, 90.00.
+      }),
+    );
+    expect(err.constraint).toBe("ledger_matches_wallet_ck");
+    await assertLedgerConsistent(db(), wallet.walletId);
+  });
+});
+
+describe("lost update sem o lock da aplicação (CHALLENGE §5.7)", () => {
+  /**
+   * Dois escritores leem o mesmo saldo (100.00, v1) sem FOR UPDATE — exatamente o que a §5.7 proíbe.
+   * O primeiro grava; o segundo, com o valor velho, tem que ser barrado pelo banco sozinho.
+   */
+  async function debit(
+    wallet: { walletId: string; playerId: string },
+    read: { balance: string; version: number },
+    amount: string,
+    claimedVersion = read.version + 1,
+  ) {
+    const after = (Number(read.balance) - Number(amount)).toFixed(2); // aritmética do teste, não do sistema
+    const bet = betRow(wallet, { amount, balance_after: after });
+    await db().inTransaction(async (exec) => {
+      const tx = insertSql("wager_transaction", bet);
+      await exec(tx.sql, tx.params);
+      const entry = insertSql("wallet_ledger_entry", {
+        id: uuid(),
+        wallet_id: wallet.walletId,
+        transaction_id: bet.id as string,
+        currency: "BRL",
+        direction: "DEBIT",
+        amount,
+        balance_before: read.balance,
+        balance_after: after,
+        wallet_version: claimedVersion,
+        created_at: new Date().toISOString(),
+      });
+      await exec(entry.sql, entry.params);
+      await exec("update wallet set balance = ?, version = ? where id = ?", [
+        after,
+        claimedVersion,
+        wallet.walletId,
+      ]);
+    });
+  }
+
+  test("o segundo escritor, com o saldo velho, é recusado — mesmo trapaceando a versão", async () => {
+    const wallet = await openWalletInDb(db(), "100.00");
+    const staleRead = { balance: "100.00", version: 1 }; // os dois leram isto
+
+    await debit(wallet, staleRead, "30.00"); // escritor 1: 100 → 70, v2
+
+    const sameVersion = await errorOf(debit(wallet, staleRead, "50.00"));
+    expect(sameVersion.constraint).toBe("wallet_ledger_entry_version_uq");
+
+    const skippedVersion = await errorOf(debit(wallet, staleRead, "50.00", 3));
+    expect(skippedVersion.constraint).toBe("wallet_ledger_entry_chain_ck");
+
+    const [row] = await db().sql<{ balance: string; version: number }>(
+      "select balance::text, version from wallet where id = ?",
+      [wallet.walletId],
+    );
+    expect(row).toEqual({ balance: "70.00", version: 2 }); // o débito do escritor 1 não se perdeu
+    await assertLedgerConsistent(db(), wallet.walletId);
+  });
+});
+
 describe("wager_transaction", () => {
   test("mesma idempotency key no mesmo provider é recusada", async () => {
     const { wallet, bet } = await walletWithProcessedBet(db());

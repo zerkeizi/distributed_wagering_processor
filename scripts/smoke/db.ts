@@ -123,6 +123,21 @@ export async function smokeDb(): Promise<void> {
         [walletId],
       ],
       [
+        "gravar lançamento sem mudar o saldo",
+        // Transação + lançamento (70 → 60, v3) num só comando, sem tocar na wallet.
+        `with t as (
+           insert into wager_transaction (id, provider_id, external_transaction_id, idempotency_key,
+             payload_hash, wallet_id, player_id, currency, round_id, game_id, kind, amount, status,
+             balance_after, processed_at, correlation_id, created_at, updated_at)
+           values (gen_random_uuid(), 'smoke', 'sabotage-' || gen_random_uuid(), 'sabotage-' || gen_random_uuid(),
+             repeat('a', 64), ?, ?, 'BRL', 'r', 'g', 'BET', 10.00, 'PROCESSED', 60.00, now(), 's', now(), now())
+           returning id, wallet_id)
+         insert into wallet_ledger_entry (id, wallet_id, transaction_id, currency, direction, amount,
+           balance_before, balance_after, wallet_version, created_at)
+         select gen_random_uuid(), t.wallet_id, t.id, 'BRL', 'DEBIT', 10.00, 70.00, 60.00, 3, now() from t`,
+        [walletId, playerId],
+      ],
+      [
         "mudar o valor de uma aposta já processada",
         "update wager_transaction set amount = 1.00 where id = ?",
         [bet.id],

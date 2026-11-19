@@ -1,11 +1,16 @@
 import { Migrator } from "@mikro-orm/migrations";
 import { defineConfig, type Options } from "@mikro-orm/postgresql";
 import { Migration20261118000000_initial } from "./migrations/Migration20261118000000_initial.ts";
+import { Migration20261119000000_ledger_matches_wallet } from "./migrations/Migration20261119000000_ledger_matches_wallet.ts";
 import { ENTITY_SCHEMAS } from "./records.ts";
 
 /** Lista explícita (sem glob): ordem determinística e nada é descoberto por acidente. */
 export const MIGRATIONS = [
   { name: "Migration20261118000000_initial", class: Migration20261118000000_initial },
+  {
+    name: "Migration20261119000000_ledger_matches_wallet",
+    class: Migration20261119000000_ledger_matches_wallet,
+  },
 ];
 
 export interface OrmOptionsInput {

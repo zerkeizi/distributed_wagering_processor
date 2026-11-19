@@ -14,3 +14,8 @@ Wager transactions sem ledger entry (`LOSS`, `REJECTED`) guardam o balance obser
 ## Considered Options
 
 Double-entry (contas de contrapartida por provider/casa) foi descartado por custo e benefício no timebox. O encadeamento por versão já permite que a reconciliação detecte lacunas ou adulterações.
+
+## Atualização (revisão da §5)
+
+A primeira versão só amarrava saldo e ledger num sentido: a trigger adiada da **wallet** exigia um lançamento que explicasse o saldo. Um lançamento inserido **sem** alterar a wallet passava no commit, deixando o extrato e o saldo em desacordo, o que contraria o "e vice-versa" da CHALLENGE §6.2. A migration `Migration20261119000000_ledger_matches_wallet` adiciona a trigger adiada do lado do **ledger**, com a mesma checagem. Com as duas, saldo e ledger só podem terminar uma transação concordando.
+

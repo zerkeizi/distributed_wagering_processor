@@ -45,11 +45,27 @@ afterAll(async () => {
   await admin.close();
 });
 
+const MIGRATIONS = [
+  "Migration20261118000000_initial",
+  "Migration20261119000000_ledger_matches_wallet",
+];
+
+async function functions(): Promise<string[]> {
+  const rows = await orm.em
+    .fork()
+    .getConnection()
+    .execute<{ proname: string }[]>(
+      "select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' order by 1",
+    );
+  return rows.map((r) => r.proname);
+}
+
 describe("migrations", () => {
-  test("up cria todas as tabelas e registra a migration", async () => {
+  test("up aplica todas, em ordem, e cria o schema", async () => {
     const applied = await orm.migrator.up();
-    expect(applied.map((m) => m.name)).toEqual(["Migration20261118000000_initial"]);
+    expect(applied.map((m) => m.name)).toEqual(MIGRATIONS);
     expect(await tables()).toEqual(expect.arrayContaining(DOMAIN_TABLES));
+    expect(await functions()).toContain("ledger_entry_matches_wallet");
     expect(await orm.migrator.getPending()).toHaveLength(0);
   });
 
@@ -57,22 +73,23 @@ describe("migrations", () => {
     expect(await orm.migrator.up()).toHaveLength(0);
   });
 
-  test("down reverte tudo (tabelas e funções)", async () => {
+  test("down desfaz só a última migration, sem tocar no schema das anteriores", async () => {
     const reverted = await orm.migrator.down();
-    expect(reverted).toHaveLength(1);
-    const remaining = await tables();
-    for (const table of DOMAIN_TABLES) expect(remaining).not.toContain(table);
-    const functions = await orm.em
-      .fork()
-      .getConnection()
-      .execute<{ proname: string }[]>(
-        "select proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public'",
-      );
-    expect(functions).toHaveLength(0);
+    expect(reverted.map((m) => m.name)).toEqual(["Migration20261119000000_ledger_matches_wallet"]);
+    expect(await functions()).not.toContain("ledger_entry_matches_wallet");
+    expect(await functions()).toContain("wallet_matches_ledger");
+    expect(await tables()).toEqual(expect.arrayContaining(DOMAIN_TABLES));
   });
 
-  test("up de novo depois do down recria o schema", async () => {
-    await orm.migrator.up();
+  test("down até o zero reverte tudo (tabelas e funções)", async () => {
+    await orm.migrator.down({ to: 0 });
+    const remaining = await tables();
+    for (const table of DOMAIN_TABLES) expect(remaining).not.toContain(table);
+    expect(await functions()).toHaveLength(0);
+  });
+
+  test("up de novo depois do down recria o schema completo", async () => {
+    expect((await orm.migrator.up()).map((m) => m.name)).toEqual(MIGRATIONS);
     expect(await tables()).toEqual(expect.arrayContaining(DOMAIN_TABLES));
   });
 });

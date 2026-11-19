@@ -152,13 +152,14 @@ A conversão fica nos mappers, e não num `Type` customizado do ORM, porque o va
 
 > CHALLENGE §5.9 ("unicidade, imutabilidade e não-negatividade… no schema do banco, não apenas em código de aplicação")
 
-Migration: `src/wagering/infrastructure/persistence/migrations/Migration20261118000000_initial.ts`. Cada garantia abaixo tem um teste em `test/integration/persistence/constraints.test.ts` que tenta violá-la com SQL cru.
+Migrations em `src/wagering/infrastructure/persistence/migrations/`: `…_initial` (schema) e `…_ledger_matches_wallet` (o lado "vice-versa" da garantia saldo ↔ ledger, adicionado depois da revisão da §5). Cada garantia abaixo tem um teste em `test/integration/persistence/constraints.test.ts` que tenta violá-la com SQL cru, e as principais também aparecem como sabotagem no `smoke:db`.
 
 | Garantia | Mecanismo no Postgres |
 |---|---|
 | Uma wallet por player + moeda | `UNIQUE (player_id, currency)` |
 | Saldo nunca negativo | `CHECK (balance >= 0)` na wallet e no ledger |
-| Toda alteração de saldo tem lançamento | constraint trigger **adiada para o commit** (`wallet_matches_ledger`): o saldo e a versão da wallet precisam bater com o último lançamento |
+| Toda alteração de saldo tem lançamento **e vice-versa** (§6.2) | duas constraint triggers **adiadas para o commit**, uma em cada tabela: quando a wallet muda (`wallet_matches_ledger_ck`) e quando entra um lançamento (`ledger_matches_wallet_ck`), a wallet precisa terminar a transação com o saldo e a versão do último lançamento |
+| Sem lost update mesmo sem o lock da aplicação (§5.7) | `UNIQUE (wallet_id, wallet_version)` + encadeamento: um escritor que leu o saldo velho é recusado, mesmo que tente "pular" a versão (teste dedicado) |
 | Ledger imutável | triggers bloqueiam `UPDATE`, `DELETE` e `TRUNCATE` |
 | Aritmética do lançamento | `CHECK (balance_after = balance_before ± amount)` |
 | Ledger encadeado e sem buracos | `UNIQUE (wallet_id, wallet_version)` + trigger que exige `balance_before` igual ao `balance_after` anterior |
