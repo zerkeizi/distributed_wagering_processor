@@ -226,6 +226,52 @@ Há dois conjuntos de códigos, separados também no tipo (`src/wagering/domain/
 - **`aggregateId` dos eventos é sempre o `walletId`**, inclusive nos eventos de transação. A wallet é a unidade de concorrência e de ordenação (`MessageGroupId`), então os eventos de uma wallet saem na ordem em que aconteceram.
 - **`WagerTransactionPendingReference` é emitido uma única vez**, na entrada em `PENDING_REFERENCE`. As novas tentativas do worker não geram evento.
 
+## Ciclo de vida da WagerTransaction
+
+> CHALLENGE §6.3 ("Defina e documente as transições válidas"); ADRs 0004, 0011, 0012
+
+```
+                 ┌──────────────▶ PROCESSED  ─┐
+                 │                            │
+   (create) ─▶ PENDING ─────────▶ REJECTED   ├─ terminais: nada sai daqui
+                 │                            │
+                 ├──────────────▶ FAILED     ─┘   (só em teoria a partir de PENDING; ver abaixo)
+                 │                  ▲
+                 ▼                  │
+          PENDING_REFERENCE ────────┤──▶ PROCESSED
+             │      ▲               └──▶ REJECTED
+             └──────┘ nova tentativa agendada
+```
+
+`PENDING` existe **só em memória**: a transação nasce, é aplicada e muda de estado dentro da mesma transação SQL, e o banco nem aceita gravar `PENDING` (ADR 0004). Todo estado persistido é um dos outros quatro.
+
+| De → Para | Quando | Quem dispara | Evento na outbox |
+|---|---|---|---|
+| — → `PENDING` | `WagerTransaction.create` (provider) ou `createOpening` (abertura de wallet) | submissão HTTP/SQS, `CreateWallet` | — |
+| `PENDING` → `PROCESSED` | regras ok; saldo e ledger aplicados (ou `LOSS`, sem mover saldo) | submissão | `WagerTransactionProcessed` + `WalletBalanceChanged` (se o saldo mudou) |
+| `PENDING` → `REJECTED` | regra de negócio falhou (saldo insuficiente, reference inválida, valor diferente…) | submissão | `WagerTransactionRejected` |
+| `PENDING` → `PENDING_REFERENCE` | a reference ainda não existe (ou ela mesma está esperando a dela) | submissão | `WagerTransactionPendingReference` (só nesta entrada) |
+| `PENDING_REFERENCE` → `PENDING_REFERENCE` | o worker tentou e a reference continua ausente: `resolutionAttempts + 1` e nova data com backoff | worker | — (sem ruído a cada tentativa) |
+| `PENDING_REFERENCE` → `PROCESSED` | a reference chegou e é válida | worker, ou reenvio do provider (ADR 0012) | `WagerTransactionProcessed` + `WalletBalanceChanged` |
+| `PENDING_REFERENCE` → `REJECTED` | a reference chegou mas é inválida, **ou** as tentativas acabaram (`REFERENCE_NOT_FOUND`) | worker, ou reenvio | `WagerTransactionRejected` |
+| `PENDING_REFERENCE` → `FAILED` | erro permanente que não é de negócio ao reprocessar (ex.: o banco recusa o lançamento porque o ledger foi corrompido) | worker, numa transação separada | — (log `error` + métrica; ADR 0011) |
+| `PROCESSED`/`REJECTED`/`FAILED` → qualquer | **proibido** | — | — |
+
+**Regras que acompanham as transições:**
+
+- **Reenvio de uma pendente cuja reference ainda não chegou não muda nada:** não conta tentativa, não remarca data, não emite evento (ADR 0012).
+- **Quando uma transação termina** (`PROCESSED` ou `REJECTED`), as pendentes que esperavam por ela têm a próxima tentativa antecipada para agora, na mesma transação SQL.
+- **`PENDING` → `FAILED`** é permitido pelo modelo, mas não acontece na prática: com processamento síncrono, uma falha antes do commit desfaz tudo e não sobra transação para marcar (ADR 0011).
+
+**Quem impõe:**
+
+| Garantia | Domínio | Banco |
+|---|---|---|
+| Terminais não mudam | `InvalidTransactionStateError` em `markProcessed`, `markPendingReference`, `reject` e `fail` (matriz 3 × 4 testada) | trigger `wager_transaction_guard` recusa qualquer `UPDATE` em linha terminal |
+| `PENDING` nunca persistido | — | `CHECK` de status sem `PENDING` |
+| Campos de negócio imutáveis | propriedades `readonly` | a mesma trigger recusa mudanças de valor, kind, wallet, reference etc., mesmo antes do estado terminal |
+| Código certo para cada estado | `reject` só aceita rejeição de negócio; `fail` só `INTERNAL_INVARIANT_VIOLATION` (no tipo, desde a separação `FailureCode`/`ErrorCode`) | `CHECK`s: `REJECTED`/`FAILED` exigem `failure_code`; `PROCESSED` exige `processed_at`; `PENDING_REFERENCE` exige `next_resolution_at` |
+
 ## Submissão de wager transactions
 
 > CHALLENGE §9 Submeter transação, §10 ("o mesmo use case da entrada HTTP"); ADRs 0003, 0004, 0007, 0008, 0010, 0012
