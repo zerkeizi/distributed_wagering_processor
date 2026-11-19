@@ -144,6 +144,11 @@ describe("banco temporariamente indisponível", () => {
       expect(res.headers.get("retry-after")).toBe("2");
       expect(elapsed).toBeLessThan(5_000); // timeout de conexão: não fica pendurado
       expect((await app().request("GET", "/health/live")).status).toBe(200);
+      // Readiness tira a instância do balanceamento; o processo continua vivo (CHALLENGE §9).
+      const ready = await app().request("GET", "/health/ready");
+      expect(ready.status).toBe(503);
+      expect(ready.body.checks.postgres.status).toBe("down");
+      expect(ready.body.checks.sqs.status).toBe("up");
     } finally {
       await restoreDatabase();
     }

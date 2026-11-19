@@ -29,7 +29,9 @@ export const wagerTransactionFields = z.object({
 export const idempotencyKeySchema = z
   .string({ error: "Idempotency-Key is required" })
   .min(1, "Idempotency-Key is required")
-  .max(255, "Idempotency-Key must be at most 255 characters");
+  .max(255, "Idempotency-Key must be at most 255 characters")
+  // Recusa em vez de aparar: a key é a fonte da verdade e não pode ser reescrita em silêncio.
+  .regex(/^\S(?:.*\S)?$/s, "Idempotency-Key must not be blank or have surrounding whitespace");
 
 /** Mensagem da fila `wager-transactions.fifo` (CHALLENGE §10). */
 export const WAGER_TRANSACTION_REQUESTED = "WagerTransactionRequested";
