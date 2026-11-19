@@ -413,6 +413,7 @@ Nos testes de concorrência, 3 processos `bun src/main.ts` separados (via `Bun.s
 > CHALLENGE §12
 
 - Logs JSON com `nestjs-pino`, `correlationId` propagado por AsyncLocalStorage e redaction de valores e payloads financeiros.
+- Erros passam por um serializer próprio (`error-serializer.ts`): o Postgres devolve a linha inteira que violou uma constraint (`Failing row contains (…, BRL, -987.65, …)`) em `detail` e, via MikroORM, também na `message`. Só campos de diagnóstico de uma allowlist (`code`, `constraint`, `table`…) saem no log, e `message`/`stack` são higienizados, inclusive nas causas. Testado com erros reais do banco (`test/integration/persistence/error-logging.test.ts`).
 - `GET /metrics` com `prom-client`:
 
   | Métrica | Mede |

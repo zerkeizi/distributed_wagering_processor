@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { LoggerModule } from "nestjs-pino";
 import type { AppConfig } from "../config/app-config.ts";
 import { APP_CONFIG } from "../config/config.module.ts";
+import { serializeError } from "./error-serializer.ts";
 import { currentLogContext } from "./log-context.ts";
 
 /**
@@ -38,6 +39,7 @@ const REDACT_PATHS = [
           serializers: {
             req: (req: IncomingMessage) => ({ method: req.method, url: req.url }),
             res: (res: ServerResponse) => ({ statusCode: res.statusCode }),
+            err: serializeError,
           },
           autoLogging: {
             ignore: (req: IncomingMessage) =>
