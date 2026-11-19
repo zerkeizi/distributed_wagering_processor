@@ -30,13 +30,28 @@
 ```
 src/
   wagering/
-    domain/          # Money, Wallet, WagerTransaction, WalletLedgerEntry, eventos — sem ORM/Nest
-    application/     # use cases + portas (repositórios, publisher, clock, id generator)
-    infrastructure/  # adapters MikroORM (EntitySchema), SQS, migrations
-    interface/       # controllers HTTP, consumer SQS, workers
-  shared/            # IntegrationEvent base, observabilidade
+    domain/                 # Money, Wallet, WagerTransaction, WalletLedgerEntry, settle(), eventos — sem ORM/Nest
+    application/            # use cases, TransactionSettler, portas (UnitOfWork, repositórios,
+                            #   OutboxStore, EventPublisher, Clock, IdGenerator, WageringTelemetry)
+    infrastructure/
+      persistence/          # records + EntitySchema, mappers, migration, UnitOfWork, outbox store
+      messaging/            # publisher SQS dos eventos
+      observability/        # adapter da telemetria (prom-client + pino)
+    interface/
+      contracts.ts          # forma das entradas (zod), compartilhada por HTTP e SQS
+      http/                 # controllers, filtro de erros (ADR 0010)
+      sqs/                  # handler (decisão) + consumer (I/O com o SQS)
+      workers/              # outbox publisher, worker de PENDING_REFERENCE
+    wagering-core.module.ts # monta os use cases (sem decorators) para HTTP, SQS e workers
+  shared/
+    config/  observability/  auth/  domain/  messaging/  infrastructure/
+    workers/                # laço de polling com parada limpa
+    testing/                # crash points (ADR 0016)
   health/
+  cli/migrate.ts
 ```
+
+A dependência é sempre para dentro: `interface` → `application` → `domain`. `infrastructure` implementa as portas de `application`. O domínio não importa Nest, MikroORM nem SDKs.
 
 ## Identificadores e correlação
 
@@ -222,14 +237,33 @@ Papel `outbox-publisher`; várias instâncias podem rodar juntas.
 
 > CHALLENGE §8, §13 (≥ 3 instâncias)
 
-Uma única imagem, com papéis ligados por env: `api`, `consumer`, `outbox-publisher` e `pending-reference-worker`, todos ativos por padrão. O Docker Compose sobe 3 réplicas atrás de um nginx. Nos testes de concorrência, 3 ou mais processos Bun são iniciados via `Bun.spawn` contra o Postgres e o LocalStack reais.
+Uma única imagem, com papéis ligados por env (`ROLES`): `api`, `consumer`, `outbox-publisher` e `pending-reference-worker`, todos ativos por padrão. O servidor HTTP sobe sempre, para health e métricas; os papéis ligam os controllers de negócio e os laços de fundo.
+
+No Docker Compose:
+- o serviço `migrate` aplica o schema uma vez e termina;
+- só então sobem 3 réplicas `app`, atrás de um nginx (`:8080`, cache de DNS de 2 s para acompanhar réplicas recriadas);
+- `stop_grace_period: 20s` dá folga ao `SHUTDOWN_GRACE_MS` da aplicação.
+
+Nos testes de concorrência, 3 processos `bun src/main.ts` separados (via `Bun.spawn`) rodam contra o Postgres e o LocalStack reais, com crashes e reinícios.
 
 ## Observabilidade
 
 > CHALLENGE §12
 
 - Logs JSON com `nestjs-pino`, `correlationId` propagado por AsyncLocalStorage e redaction de valores e payloads financeiros.
-- `GET /metrics` com `prom-client`: transações por status, duplicatas detectadas, retries, mensagens em DLQ, lock timeouts, outbox lag (idade do evento pendente mais antigo), latência de processamento (histograma) e divergências de reconciliação.
+- `GET /metrics` com `prom-client`:
+
+  | Métrica | Mede |
+  |---|---|
+  | `wagering_transactions_total{kind,status,channel}` | transações por status e canal |
+  | `wagering_duplicates_detected_total{source}` | replays por idempotency key e duplicatas absorvidas pelo inbox |
+  | `wagering_idempotency_conflicts_total{code}` | conflitos de idempotência |
+  | `wagering_retries_total{component}` | retries no consumer, no publisher e no worker |
+  | `wagering_dlq_messages_total{reason}` e `wagering_dlq_depth` | mensagens em DLQ |
+  | `wagering_lock_conflicts_total{type}` | conflitos de lock |
+  | `wagering_outbox_lag_seconds` e `wagering_outbox_pending_events` | outbox lag |
+  | `wagering_processing_duration_seconds{channel,outcome}` | latência de processamento (histograma) |
+  | `wagering_reconciliation_divergences_total` | divergências de reconciliação |
 - `GET /health/live` e `GET /health/ready` (Postgres e SQS), sem autenticação.
 - **Métricas são por instância:** cada réplica expõe o próprio `/metrics`. Em produção, o Prometheus coleta cada instância diretamente (service discovery), e não pelo load balancer; no compose, um `GET /metrics` pelo nginx mostra só a réplica que atendeu.
 - **Qual réplica atendeu** fica só nos logs internos: toda linha traz `instanceId`, junto com `correlationId`, `transactionId` e `walletId`. Nenhum identificador de instância é exposto na resposta HTTP. Para investigar um problema, o provider informa o `transactionId` ou o `X-Correlation-Id` (que ele pode enviar e recebe de volta), e o resto se encontra nos logs.
@@ -259,6 +293,12 @@ O extrato (`GET /wallets/:id/ledger`) vai do mais recente para o mais antigo, co
 - Ledger de partida simples, sem double-entry (ADR 0009).
 - Autenticação não implementada (ADR 0005).
 - Recusas por wallet inexistente ou divergente não ficam na tabela de wager transactions (ADR 0007).
+- **Sem retenção para inbox e outbox.** Linhas processadas e publicadas ficam para sempre. Em produção, faltaria um job de limpeza (por exemplo, apagar o que tem mais de N dias) ou particionamento por data.
+- **Ordem de eventos entre publishers é melhor esforço**, e a deduplicação do SQS FIFO vale só 5 min: os consumidores precisam deduplicar por `eventId` e ordenar por `walletVersion` (ADR 0013).
+- **Sem ferramenta de reprocessamento da DLQ.** Mensagens na DLQ ficam lá, com o motivo no atributo `deadLetterReason`, para análise manual.
+- **`FAILED` não emite evento de integração.** Ele é raro (exige estado corrompido), e o alerta vem do log `error` e da métrica.
+- **Métricas são por instância.** Não há agregação no próprio serviço; isso é papel do Prometheus.
+- **Rodou só contra o LocalStack.** O comportamento do SQS real (por exemplo, a janela de deduplicação e o tempo de redrive) foi assumido a partir da documentação da AWS, não medido.
 
 ## Trabalho futuro
 
