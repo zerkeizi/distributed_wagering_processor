@@ -39,6 +39,12 @@ export interface WagerTransactionRepository {
     providerId: string,
     externalTransactionId: string,
   ): Promise<ResolvedReference | undefined>;
+  /**
+   * Reagenda para `at` as transações em PENDING_REFERENCE que esperam por
+   * (providerId, externalTransactionId): a reference chegou, não há por que esperar o backoff.
+   * @returns quantas foram reagendadas.
+   */
+  rescheduleWaitingOn(providerId: string, externalTransactionId: string, at: Date): Promise<number>;
   add(transaction: WagerTransaction): void;
   save(transaction: WagerTransaction): void;
 }

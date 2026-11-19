@@ -25,6 +25,7 @@ const STATUS_BY_CODE: Readonly<Record<string, number>> = {
   [FailureCode.UnsupportedKind]: HttpStatus.BAD_REQUEST,
   [FailureCode.ReferenceRequired]: HttpStatus.BAD_REQUEST,
   [FailureCode.WalletNotFound]: HttpStatus.NOT_FOUND,
+  [FailureCode.TransactionNotFound]: HttpStatus.NOT_FOUND,
   [FailureCode.CurrencyMismatch]: HttpStatus.UNPROCESSABLE_ENTITY,
   [FailureCode.WalletPlayerMismatch]: HttpStatus.UNPROCESSABLE_ENTITY,
   [FailureCode.WalletAlreadyExists]: HttpStatus.CONFLICT,
@@ -119,6 +120,8 @@ function codeForHttpStatus(status: number): string {
   switch (status) {
     case HttpStatus.BAD_REQUEST:
       return FailureCode.InvalidPayload;
+    case HttpStatus.FORBIDDEN:
+      return "FORBIDDEN";
     case HttpStatus.NOT_FOUND:
       return "ROUTE_NOT_FOUND";
     case HttpStatus.PAYLOAD_TOO_LARGE:

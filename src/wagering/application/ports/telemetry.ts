@@ -12,8 +12,16 @@ export interface ReconciliationDivergence {
  * Sinais operacionais que os use cases emitem (CHALLENGE §12). A porta esconde se viram métrica,
  * log ou ambos — o adapter decide; os use cases não conhecem prom-client nem pino.
  */
+export type SubmissionOutcome = "created" | "replayed" | "resolved" | "conflict" | "error";
+
 export interface WageringTelemetry {
+  /** Uma transação mudou de estado (nova, ou pendente que se resolveu). */
   transactionCompleted(kind: string, status: string, channel: EntryChannel): void;
+  /** Reenvio servido sem novo efeito: `idempotent_replay` (mesma key) ou `inbox` (mesmo messageId). */
+  duplicateDetected(source: "idempotent_replay" | "inbox"): void;
+  idempotencyConflict(code: string): void;
+  lockConflict(type: "lock_timeout" | "deadlock"): void;
+  submissionObserved(channel: EntryChannel, outcome: SubmissionOutcome, seconds: number): void;
   reconciliationDivergence(divergence: ReconciliationDivergence): void;
 }
 

@@ -4,6 +4,7 @@ import { MetricsService } from "../../../shared/observability/metrics.service.ts
 import type {
   EntryChannel,
   ReconciliationDivergence,
+  SubmissionOutcome,
   WageringTelemetry,
 } from "../../application/ports/telemetry.ts";
 
@@ -19,6 +20,22 @@ export class WageringTelemetryAdapter implements WageringTelemetry {
 
   transactionCompleted(kind: string, status: string, channel: EntryChannel): void {
     this.metrics.transactions.inc({ kind, status, channel });
+  }
+
+  duplicateDetected(source: "idempotent_replay" | "inbox"): void {
+    this.metrics.duplicates.inc({ source });
+  }
+
+  idempotencyConflict(code: string): void {
+    this.metrics.idempotencyConflicts.inc({ code });
+  }
+
+  lockConflict(type: "lock_timeout" | "deadlock"): void {
+    this.metrics.lockConflicts.inc({ type });
+  }
+
+  submissionObserved(channel: EntryChannel, outcome: SubmissionOutcome, seconds: number): void {
+    this.metrics.processingDuration.observe({ channel, outcome }, seconds);
   }
 
   reconciliationDivergence(divergence: ReconciliationDivergence): void {

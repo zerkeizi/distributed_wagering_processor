@@ -6,11 +6,13 @@
 import { smokeDb } from "./db.ts";
 import { smokeDomain } from "./domain.ts";
 import { smokeInfra } from "./infra.ts";
+import { smokeRace } from "./race.ts";
 
 const parts: Record<string, () => Promise<void>> = {
   infra: smokeInfra,
   domain: smokeDomain,
   db: smokeDb,
+  race: smokeRace,
 };
 
 const name = process.argv[2] ?? "infra";

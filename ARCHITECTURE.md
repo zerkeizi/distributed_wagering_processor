@@ -91,7 +91,7 @@ As migrations rodam num passo separado (serviço `migrate` do compose, `bun run 
 
 | Classe | Códigos | Ação do provider |
 |---|---|---|
-| Corrigir o payload | `INVALID_PAYLOAD`, `UNSUPPORTED_KIND`, `REFERENCE_REQUIRED`, `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH`, `WALLET_NOT_FOUND`, `WALLET_ALREADY_EXISTS`, `IDEMPOTENCY_KEY_CONFLICT`, `EXTERNAL_ID_CONFLICT` | Não reenviar igual; corrigir os dados ou a chave |
+| Corrigir o payload | `INVALID_PAYLOAD`, `UNSUPPORTED_KIND`, `REFERENCE_REQUIRED`, `CURRENCY_MISMATCH`, `WALLET_PLAYER_MISMATCH`, `WALLET_NOT_FOUND`, `WALLET_ALREADY_EXISTS`, `TRANSACTION_NOT_FOUND`, `IDEMPOTENCY_KEY_CONFLICT`, `EXTERNAL_ID_CONFLICT` | Não reenviar igual; corrigir os dados ou a chave |
 | Rejeição de negócio (terminal) | `INSUFFICIENT_FUNDS`, `REVERSAL_INSUFFICIENT_FUNDS`, `REFERENCE_NOT_FOUND`, `REFERENCE_MISMATCH`, `REFERENCE_KIND_NOT_ALLOWED`, `REFERENCE_NOT_PROCESSED`, `REFERENCE_ALREADY_REVERSED`, `AMOUNT_MISMATCH` | Desistir; um reenvio devolve o mesmo resultado |
 | Transitória | `TEMPORARILY_UNAVAILABLE`, `LOCK_TIMEOUT` | Reenviar a mesma requisição (com a mesma idempotency key) |
 | Falha interna (terminal) | `INTERNAL_INVARIANT_VIOLATION` | Escalar para suporte; ver ADR 0011 |
@@ -121,6 +121,38 @@ As migrations rodam num passo separado (serviço `migrate` do compose, `bun run 
 - **`aggregateId` dos eventos é sempre o `walletId`**, inclusive nos eventos de transação. A wallet é a unidade de concorrência e de ordenação (`MessageGroupId`), então os eventos de uma wallet saem na ordem em que aconteceram.
 - **`WagerTransactionPendingReference` é emitido uma única vez**, na entrada em `PENDING_REFERENCE`. As novas tentativas do worker não geram evento.
 
+## Submissão de wager transactions
+
+> CHALLENGE §9 Submeter transação, §10 ("o mesmo use case da entrada HTTP"); ADRs 0003, 0004, 0007, 0008, 0010, 0012
+
+`SubmitWagerTransaction` atende HTTP e SQS. Numa única transação SQL, com `lock_timeout` (`WALLET_LOCK_TIMEOUT_MS`, padrão 2 s):
+
+1. Valida o contrato e calcula o `payloadHash` **antes** de tocar no banco.
+2. Faz `SELECT … FOR UPDATE` na wallet. Wallet inexistente ou divergente é recusada sem persistir nada.
+3. Busca por `(providerId, idempotencyKey)`:
+   - hash igual → replay;
+   - hash diferente → `409 IDEMPOTENCY_KEY_CONFLICT`.
+
+   Sem resultado, busca por `(providerId, externalTransactionId)`; se encontrar → `409 EXTERNAL_ID_CONFLICT`.
+4. Resolve a reference, aplica `settle()` e grava transação, lançamento, saldo, eventos na outbox e, via SQS, o registro de inbox.
+5. Se a transação terminou (`PROCESSED`/`REJECTED`), reagenda para agora as `PENDING_REFERENCE` que esperavam por ela.
+
+Como o lock vem antes da busca de idempotência, reenvios para a **mesma wallet** se serializam e nunca disputam o `INSERT`. Reenvios com a mesma key para **wallets diferentes** podem disputar; nesse caso a constraint única barra o segundo no commit e o use case repete uma vez, caindo no caminho normal (replay ou conflito, nunca `500`). Um teste de concorrência exercita exatamente esse caso.
+
+**Reenvio de pendente:** se a reference ainda não existe, a resposta é `202` e **nada muda**: reenvios do provider não consomem as tentativas do worker (ADR 0012). Se a reference já chegou, a transação é resolvida no próprio reenvio.
+
+**Status por resultado:**
+
+| Resultado | Status |
+|---|---|
+| aplicada agora (nova, ou pendente resolvida no reenvio) | `201` |
+| replay de `PROCESSED` | `200` |
+| `PENDING_REFERENCE` | `202` |
+| `REJECTED` (novo ou replay) | `422`, com o corpo completo |
+| `FAILED` | `500` |
+
+O corpo é sempre `{ transactionId, status, balance, failureCode, idempotentReplay }`, e `balance` é o saldo observado quando a transação terminou.
+
 ## Referências fora de ordem
 
 > CHALLENGE §7.1
@@ -143,6 +175,7 @@ Uma única imagem, com papéis ligados por env: `api`, `consumer`, `outbox-publi
 - Logs JSON com `nestjs-pino`, `correlationId` propagado por AsyncLocalStorage e redaction de valores e payloads financeiros.
 - `GET /metrics` com `prom-client`: transações por status, duplicatas detectadas, retries, mensagens em DLQ, lock timeouts, outbox lag (idade do evento pendente mais antigo), latência de processamento (histograma) e divergências de reconciliação.
 - `GET /health/live` e `GET /health/ready` (Postgres e SQS), sem autenticação.
+- **Qual réplica atendeu** fica só nos logs internos: toda linha traz `instanceId`, junto com `correlationId`, `transactionId` e `walletId`. Nenhum identificador de instância é exposto na resposta HTTP. Para investigar um problema, o provider informa o `transactionId` ou o `X-Correlation-Id` (que ele pode enviar e recebe de volta), e o resto se encontra nos logs.
 
 ## Reconciliação
 

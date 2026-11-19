@@ -11,6 +11,7 @@ export enum FailureCode {
   WalletPlayerMismatch = "WALLET_PLAYER_MISMATCH",
   WalletNotFound = "WALLET_NOT_FOUND",
   WalletAlreadyExists = "WALLET_ALREADY_EXISTS",
+  TransactionNotFound = "TRANSACTION_NOT_FOUND",
   IdempotencyKeyConflict = "IDEMPOTENCY_KEY_CONFLICT",
   ExternalIdConflict = "EXTERNAL_ID_CONFLICT",
 
@@ -42,6 +43,7 @@ const CATEGORY: Readonly<Record<FailureCode, FailureCategory>> = {
   [FailureCode.WalletPlayerMismatch]: "invalid-request",
   [FailureCode.WalletNotFound]: "invalid-request",
   [FailureCode.WalletAlreadyExists]: "invalid-request",
+  [FailureCode.TransactionNotFound]: "invalid-request",
   [FailureCode.IdempotencyKeyConflict]: "invalid-request",
   [FailureCode.ExternalIdConflict]: "invalid-request",
   [FailureCode.InsufficientFunds]: "business-rejection",

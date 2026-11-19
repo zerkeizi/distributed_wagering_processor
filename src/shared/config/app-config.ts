@@ -32,6 +32,10 @@ const envSchema = z.object({
   SQS_WAGER_DLQ_NAME: z.string().endsWith(".fifo").default("wager-transactions-dlq.fifo"),
   SQS_EVENTS_QUEUE_NAME: z.string().endsWith(".fifo").default("wagering-events.fifo"),
   HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+  WALLET_LOCK_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+  REFERENCE_RETRY_MAX: z.coerce.number().int().min(0).default(10),
+  REFERENCE_RETRY_BASE_MS: z.coerce.number().int().positive().default(2000),
+  REFERENCE_RETRY_MAX_DELAY_MS: z.coerce.number().int().positive().default(300_000),
 });
 
 export interface AppConfig {
@@ -54,6 +58,16 @@ export interface AppConfig {
     readonly eventsQueueName: string;
   };
   readonly healthCheckTimeoutMs: number;
+  readonly wagering: {
+    /** Espera máxima pelo lock da wallet antes de responder 503 LOCK_TIMEOUT (ADR 0003). */
+    readonly walletLockTimeoutMs: number;
+    /** Política de espera por reference fora de ordem (CHALLENGE §7.1). */
+    readonly referenceRetry: {
+      readonly maxRetries: number;
+      readonly baseDelayMs: number;
+      readonly maxDelayMs: number;
+    };
+  };
 }
 
 export class InvalidConfigError extends Error {
@@ -91,5 +105,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       eventsQueueName: e.SQS_EVENTS_QUEUE_NAME,
     },
     healthCheckTimeoutMs: e.HEALTH_CHECK_TIMEOUT_MS,
+    wagering: {
+      walletLockTimeoutMs: e.WALLET_LOCK_TIMEOUT_MS,
+      referenceRetry: {
+        maxRetries: e.REFERENCE_RETRY_MAX,
+        baseDelayMs: e.REFERENCE_RETRY_BASE_MS,
+        maxDelayMs: e.REFERENCE_RETRY_MAX_DELAY_MS,
+      },
+    },
   };
 }

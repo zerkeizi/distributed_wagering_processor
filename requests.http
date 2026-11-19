@@ -45,6 +45,96 @@ Content-Type: application/json
 ### Wallet inexistente → 404 WALLET_NOT_FOUND
 GET {{baseUrl}}/wallets/{{$guid}}
 
+### ---------------------------------------------------------------- Apostas
+### BET de 25.00 na wallet criada acima → 201 PROCESSED
+# @name bet
+POST {{baseUrl}}/wagering/transactions
+Content-Type: application/json
+Idempotency-Key: provider-a:bet-demo-1
+
+{
+  "providerId": "provider-a",
+  "externalTransactionId": "bet-demo-1",
+  "playerId": "{{createWallet.response.body.playerId}}",
+  "walletId": "{{createWallet.response.body.id}}",
+  "roundId": "round-1",
+  "gameId": "fortune-chimp",
+  "kind": "BET",
+  "money": { "amount": "25.00", "currency": "BRL" }
+}
+
+### Mesma requisição de novo → 200, idempotentReplay: true, saldo original
+POST {{baseUrl}}/wagering/transactions
+Content-Type: application/json
+Idempotency-Key: provider-a:bet-demo-1
+
+{
+  "providerId": "provider-a",
+  "externalTransactionId": "bet-demo-1",
+  "playerId": "{{createWallet.response.body.playerId}}",
+  "walletId": "{{createWallet.response.body.id}}",
+  "roundId": "round-1",
+  "gameId": "fortune-chimp",
+  "kind": "BET",
+  "money": { "amount": "25.00", "currency": "BRL" }
+}
+
+### Mesma key, valor diferente → 409 IDEMPOTENCY_KEY_CONFLICT
+POST {{baseUrl}}/wagering/transactions
+Content-Type: application/json
+Idempotency-Key: provider-a:bet-demo-1
+
+{
+  "providerId": "provider-a",
+  "externalTransactionId": "bet-demo-1",
+  "playerId": "{{createWallet.response.body.playerId}}",
+  "walletId": "{{createWallet.response.body.id}}",
+  "roundId": "round-1",
+  "gameId": "fortune-chimp",
+  "kind": "BET",
+  "money": { "amount": "99.00", "currency": "BRL" }
+}
+
+### REFUND da BET → 201 (saldo volta); envie de novo com outro id para ver 422 REFERENCE_ALREADY_REVERSED
+POST {{baseUrl}}/wagering/transactions
+Content-Type: application/json
+Idempotency-Key: provider-a:refund-demo-1
+
+{
+  "providerId": "provider-a",
+  "externalTransactionId": "refund-demo-1",
+  "playerId": "{{createWallet.response.body.playerId}}",
+  "walletId": "{{createWallet.response.body.id}}",
+  "roundId": "round-1",
+  "gameId": "fortune-chimp",
+  "kind": "REFUND",
+  "money": { "amount": "25.00", "currency": "BRL" },
+  "referenceExternalTransactionId": "bet-demo-1"
+}
+
+### ROLLBACK de uma BET que ainda não chegou → 202 PENDING_REFERENCE
+POST {{baseUrl}}/wagering/transactions
+Content-Type: application/json
+Idempotency-Key: provider-a:rollback-demo-1
+
+{
+  "providerId": "provider-a",
+  "externalTransactionId": "rollback-demo-1",
+  "playerId": "{{createWallet.response.body.playerId}}",
+  "walletId": "{{createWallet.response.body.id}}",
+  "roundId": "round-1",
+  "gameId": "fortune-chimp",
+  "kind": "ROLLBACK",
+  "money": { "amount": "10.00", "currency": "BRL" },
+  "referenceExternalTransactionId": "bet-demo-late"
+}
+
+### Consultar a BET pelo id interno
+GET {{baseUrl}}/wagering/transactions/{{bet.response.body.transactionId}}
+
+### Consultar pelo id do provider
+GET {{baseUrl}}/providers/provider-a/wagering/transactions/bet-demo-1
+
 ### Health e métricas (sem autenticação)
 GET {{baseUrl}}/health/ready
 

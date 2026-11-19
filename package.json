@@ -20,7 +20,8 @@
     "migration:up": "bun src/cli/migrate.ts up",
     "migration:down": "bun src/cli/migrate.ts down",
     "migration:status": "bun src/cli/migrate.ts status",
-    "smoke:db": "bun scripts/smoke/index.ts db"
+    "smoke:db": "bun scripts/smoke/index.ts db",
+    "smoke:race": "bun scripts/smoke/index.ts race"
   },
   "dependencies": {
     "@aws-sdk/client-sqs": "^3.1171.0",

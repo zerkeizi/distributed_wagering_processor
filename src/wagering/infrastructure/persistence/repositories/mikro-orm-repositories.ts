@@ -135,6 +135,25 @@ export class MikroOrmWagerTransactionRepository implements WagerTransactionRepos
     return { transaction, alreadyReversed: reversals > 0 };
   }
 
+  rescheduleWaitingOn(
+    providerId: string,
+    externalTransactionId: string,
+    at: Date,
+  ): Promise<number> {
+    // UPDATE direto (fora do Unit of Work): as dependentes não foram carregadas neste scope, e o
+    // trigger de guarda só permite mexer em campos de agendamento de transações não terminais.
+    return this.em.nativeUpdate(
+      WagerTransactionRecord,
+      {
+        providerId,
+        referenceExternalTransactionId: externalTransactionId,
+        status: WagerTransactionStatus.PendingReference,
+        nextResolutionAt: { $gt: at },
+      },
+      { nextResolutionAt: at, updatedAt: at },
+    );
+  }
+
   add(transaction: WagerTransaction): void {
     this.em.persist(this.tracked.remember(transaction.id, transactionToRecord(transaction)));
   }
